@@ -259,6 +259,10 @@ class MainWindow(QMainWindow):
         self.set_end_btn = QPushButton("끝점 [O]")
         self.set_end_btn.clicked.connect(self.set_end_mark)
         self.controls_layout.addWidget(self.set_end_btn)
+
+        self.clear_btn = QPushButton("선택 초기화")
+        self.clear_btn.clicked.connect(self.clear_segments)
+        self.controls_layout.addWidget(self.clear_btn)
         
         self.cut_label = QLabel("시작: - | 끝: -")
         self.controls_layout.addWidget(self.cut_label)
@@ -304,6 +308,8 @@ class MainWindow(QMainWindow):
         # Reset selection
         self.start_time = 0
         self.end_time = 0
+        self.segments = []
+        self.slider.set_segments(self.segments)
         self.slider.set_current_selection(-1, -1)
         self.update_cut_label()
         self.check_export_ready()
@@ -368,13 +374,14 @@ class MainWindow(QMainWindow):
         self.cut_label.setText(f"시작: {start_str} | 끝: {end_str}")
 
     def check_export_ready(self):
-        if self.start_time < self.end_time and self.file_path:
+        if len(self.segments) > 0 and self.file_path:
             self.export_btn.setEnabled(True)
         else:
             self.export_btn.setEnabled(False)
 
     def set_start_mark(self):
         self.start_time = self.media_player.position()
+        self.end_time = 0 # Reset end time for a new segment
         self.update_cut_label()
         self.slider.set_current_selection(self.start_time, self.end_time)
         self.check_export_ready()
@@ -384,38 +391,76 @@ class MainWindow(QMainWindow):
         if current_pos <= self.start_time:
              QMessageBox.warning(self, "경고", "끝점은 시작점보다 뒤에 있어야 합니다.")
              return
+        
         self.end_time = current_pos
         self.update_cut_label()
-        self.slider.set_current_selection(self.start_time, self.end_time)
+        
+        # Save the segment
+        self.segments.append((self.start_time, self.end_time))
+        self.slider.set_segments(self.segments)
+        self.slider.set_current_selection(-1, -1) # Clear current selection visual after saving
+        
+        # Reset current selection state so next 'start' can be made cleanly
+        self.start_time = 0
+        self.end_time = 0
+        self.update_cut_label()
+        
+        self.check_export_ready()
+    def clear_segments(self):
+        self.segments = []
+        self.start_time = 0
+        self.end_time = 0
+        self.slider.set_segments(self.segments)
+        self.slider.set_current_selection(-1, -1)
+        self.update_cut_label()
         self.check_export_ready()
 
     def export_video(self):
-        if not self.file_path:
+        if not self.file_path or not self.segments:
             return
 
-        # Generate default output filename
+        # Generate default output filename base
         dir_name = os.path.dirname(self.file_path)
         base_name = os.path.splitext(os.path.basename(self.file_path))[0]
         default_output = os.path.join(dir_name, f"{base_name}_cut.mkv")
 
-        output_path, _ = QFileDialog.getSaveFileName(self, "저장할 파일 선택", default_output, "MKV Files (*.mkv);;All Files (*)")
+        output_path, _ = QFileDialog.getSaveFileName(self, "저장할 파일 선택 (기본 이름으로 _1, _2 ... 자동 생성됨)", default_output, "MKV Files (*.mkv);;All Files (*)")
         
         if output_path:
             self.play_button.setEnabled(False)
             self.export_btn.setEnabled(False)
-            self.export_btn.setText("처리 중...")
-            QApplication.processEvents() # Force UI update
+            
+            output_dir = os.path.dirname(output_path)
+            output_base, output_ext = os.path.splitext(os.path.basename(output_path))
+            
+            total = len(self.segments)
+            success_count = 0
+            fail_messages = []
+            
+            for i, (start_idx, end_idx) in enumerate(self.segments):
+                self.export_btn.setText(f"처리 중... ({i+1}/{total})")
+                QApplication.processEvents() # Force UI update
+                
+                # Append number if there are multiple segments
+                if total > 1:
+                    current_output = os.path.join(output_dir, f"{output_base}_{i+1}{output_ext}")
+                else:
+                    current_output = output_path
 
-            success, message = video_cutter.cut_video(self.file_path, self.start_time, self.end_time, output_path)
+                success, message = video_cutter.cut_video(self.file_path, start_idx, end_idx, current_output)
+                if success:
+                    success_count += 1
+                else:
+                    fail_messages.append(f"구간 {i+1}: {message}")
             
             self.play_button.setEnabled(True)
             self.export_btn.setEnabled(True)
             self.export_btn.setText("내보내기")
 
-            if success:
-                QMessageBox.information(self, "성공", f"성공적으로 저장되었습니다:\n{output_path}")
+            if success_count == total:
+                QMessageBox.information(self, "성공", f"총 {total}개의 구간이 성공적으로 저장되었습니다.")
             else:
-                QMessageBox.critical(self, "실패", f"오류가 발생했습니다:\n{message}")
+                QMessageBox.critical(self, "완료", f"{success_count}/{total}개 성공.\n실패 내역:\n" + "\n".join(fail_messages))
 
     def handle_errors(self):
         self.play_button.setEnabled(False)
