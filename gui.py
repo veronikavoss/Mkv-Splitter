@@ -4,11 +4,23 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QHBoxLayout, QPushButton, QSlider, QLabel, QFileDialog, QMessageBox, QStyle, QStyleOptionSlider, QListWidget, QAbstractItemView)
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
-from PySide6.QtCore import Qt, QUrl, QTime, QPoint
+from PySide6.QtCore import Qt, QUrl, QTime, QPoint, Signal, QObject, QEvent
 
 import video_cutter
 
 from PySide6.QtGui import QPainter, QColor, QPolygon, QPen, QBrush
+
+class ClickableVideoWidget(QVideoWidget):
+    """
+    A custom QVideoWidget that emits a clicked signal on mouse press.
+    """
+    clicked = Signal()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+            event.accept()
+        super().mousePressEvent(event)
 
 class SeekSlider(QSlider):
     """
@@ -136,6 +148,60 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("MKV Lossless Cutter (한글 지원)")
         self.resize(1000, 800) # Increased height for list
 
+        # Apply Modern Dark Theme
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #2b2b2b;
+                color: #ffffff;
+            }
+            QWidget {
+                background-color: #2b2b2b;
+                color: #ffffff;
+                font-family: 'Segoe UI', sans-serif;
+                font-size: 14px;
+            }
+            QPushButton {
+                background-color: #3d3d3d;
+                border: 1px solid #555555;
+                border-radius: 5px;
+                padding: 8px 16px;
+                color: #ffffff;
+            }
+            QPushButton:hover {
+                background-color: #4d4d4d;
+                border-color: #0078d7;
+            }
+            QPushButton:pressed {
+                background-color: #252525;
+            }
+            QPushButton:disabled {
+                background-color: #2b2b2b;
+                border-color: #333333;
+                color: #777777;
+            }
+            QLabel {
+                color: #dddddd;
+            }
+            QSlider::groove:horizontal {
+                border: 1px solid #3d3d3d;
+                height: 8px;
+                background: #1e1e1e;
+                margin: 2px 0;
+                border-radius: 4px;
+            }
+            QSlider::handle:horizontal {
+                background: #0078d7;
+                border: 1px solid #0078d7;
+                width: 16px;
+                height: 16px;
+                margin: -4px 0;
+                border-radius: 8px;
+            }
+            QSlider::handle:horizontal:hover {
+                background: #1e90ff;
+            }
+        """)
+
         # Media Player Setup
         self.media_player = QMediaPlayer()
         self.audio_output = QAudioOutput()
@@ -147,7 +213,8 @@ class MainWindow(QMainWindow):
         self.layout = QVBoxLayout(self.central_widget)
 
         # Video Widget
-        self.video_widget = QVideoWidget()
+        self.video_widget = ClickableVideoWidget(self.central_widget)
+        self.video_widget.clicked.connect(self.toggle_play)
         self.layout.addWidget(self.video_widget)
         self.media_player.setVideoOutput(self.video_widget)
 
@@ -208,6 +275,16 @@ class MainWindow(QMainWindow):
 
         self.file_path = ""
         self.is_slider_pressed = False
+        
+        # Enable Drag and Drop (Handled by Global Filter in main.py)
+        self.setAcceptDrops(True)
+
+    def handle_dropped_file(self, file_path):
+        valid_extensions = ['.mkv', '.mp4', '.avi']
+        if os.path.splitext(file_path)[1].lower() in valid_extensions:
+            self.load_file(file_path)
+        else:
+            QMessageBox.warning(self, "지원하지 않는 파일", f"비디오 파일(.mkv, .mp4, .avi)만 열 수 있습니다.\n입력 파일: {file_path}")
 
     def open_file(self):
         file_dialog = QFileDialog(self)
@@ -215,18 +292,21 @@ class MainWindow(QMainWindow):
         if file_dialog.exec():
             files = file_dialog.selectedFiles()
             if files:
-                self.file_path = files[0]
-                self.media_player.setSource(QUrl.fromLocalFile(self.file_path))
-                self.play_button.setEnabled(True)
-                self.play_video()
-                self.setWindowTitle(f"MKV Lossless Cutter - {os.path.basename(self.file_path)}")
-                
-                # Reset selection
-                self.start_time = 0
-                self.end_time = 0
-                self.slider.set_current_selection(-1, -1)
-                self.update_cut_label()
-                self.check_export_ready()
+                self.load_file(files[0])
+
+    def load_file(self, file_path):
+        self.file_path = file_path
+        self.media_player.setSource(QUrl.fromLocalFile(self.file_path))
+        self.play_button.setEnabled(True)
+        self.play_video()
+        self.setWindowTitle(f"MKV Lossless Cutter - {os.path.basename(self.file_path)}")
+        
+        # Reset selection
+        self.start_time = 0
+        self.end_time = 0
+        self.slider.set_current_selection(-1, -1)
+        self.update_cut_label()
+        self.check_export_ready()
 
     def toggle_play(self):
         if self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
