@@ -75,12 +75,12 @@ class SeekSlider(QSlider):
             ratio = (val - self.minimum()) / val_range
             return slider_min_pos + int(ratio * slider_length)
 
-        # Draw Saved Segments (Gray/Light Blue)
+        # Draw Saved Segments (Gold)
         for start, end in self.segments:
             s_px = get_px(start)
             e_px = get_px(end)
             if s_px >= 0 and e_px > s_px:
-                painter.setBrush(QColor(100, 100, 100, 100)) # Darker gray for saved
+                painter.setBrush(QColor(255, 215, 0, 180)) # Gold for saved segments
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.drawRect(s_px, rect_y, e_px - s_px, rect_height)
 
