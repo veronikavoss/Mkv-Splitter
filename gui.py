@@ -309,6 +309,10 @@ class MainWindow(QMainWindow):
         self.check_export_ready()
 
     def toggle_play(self):
+        if not self.file_path:
+            self.open_file()
+            return
+            
         if self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             self.media_player.pause()
             self.play_button.setText("재생")
