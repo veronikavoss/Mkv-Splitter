@@ -326,6 +326,28 @@ class MainWindow(QMainWindow):
         self.end_time = 0
         self.segments = [] # List of (start, end)
         
+        self.jump_start_icon = QIcon("assets/start_button.png")
+        self.jump_start_btn = QPushButton()
+        self.jump_start_btn.setIcon(self.jump_start_icon)
+        self.jump_start_btn.setIconSize(QSize(42, 36))
+        self.jump_start_btn.setFixedSize(42, 36)
+        self.jump_start_btn.setStyleSheet("background-color: transparent; border: none;")
+        self.jump_start_btn.setToolTip("시작점으로 이동")
+        self.jump_start_btn.clicked.connect(self.jump_to_start)
+        self.jump_start_btn.setEnabled(False)
+        self.controls_layout.addWidget(self.jump_start_btn)
+        
+        self.jump_end_icon = QIcon("assets/end_button.png")
+        self.jump_end_btn = QPushButton()
+        self.jump_end_btn.setIcon(self.jump_end_icon)
+        self.jump_end_btn.setIconSize(QSize(42, 36))
+        self.jump_end_btn.setFixedSize(42, 36)
+        self.jump_end_btn.setStyleSheet("background-color: transparent; border: none;")
+        self.jump_end_btn.setToolTip("끝점으로 이동")
+        self.jump_end_btn.clicked.connect(self.jump_to_end)
+        self.jump_end_btn.setEnabled(False)
+        self.controls_layout.addWidget(self.jump_end_btn)
+
         self.start_icon = QIcon("assets/start_point.png")
         self.set_start_btn = QPushButton()
         self.set_start_btn.setIcon(self.start_icon)
@@ -393,6 +415,8 @@ class MainWindow(QMainWindow):
         self.frame_pre_button.setEnabled(True)
         self.next_button.setEnabled(True)
         self.frame_next_button.setEnabled(True)
+        self.jump_start_btn.setEnabled(True)
+        self.jump_end_btn.setEnabled(True)
         self.play_video()
         self.setWindowTitle(f"MKV Lossless Cutter - {os.path.basename(self.file_path)}")
         
@@ -415,6 +439,8 @@ class MainWindow(QMainWindow):
         self.frame_pre_button.setEnabled(False)
         self.next_button.setEnabled(False)
         self.frame_next_button.setEnabled(False)
+        self.jump_start_btn.setEnabled(False)
+        self.jump_end_btn.setEnabled(False)
         self.play_button.setIcon(self.play_icon)
         self.setWindowTitle("MKV Lossless Cutter")
         
@@ -488,6 +514,53 @@ class MainWindow(QMainWindow):
             else:
                 new_pos = self.media_player.position() + 33
             self.set_position(new_pos)
+
+    def jump_to_start(self):
+        if not self.file_path: return
+        starts = [s[0] for s in self.segments]
+        # 현재 활성화된(저장 대기 중인) 설정 구간이 있다면 포함
+        if self.start_time != 0 or self.end_time != 0:
+            starts.append(self.start_time)
+            
+        if not starts:
+            self.set_position(self.start_time)
+            return
+            
+        starts = sorted(list(set(starts)))
+        current_pos = self.media_player.position()
+        
+        # 현재 위치보다 큰(오른쪽에 있는) 첫 번째 시작점 찾기 (약간의 오차 무시 위해 50ms 추가)
+        next_start = next((s for s in starts if s > current_pos + 50), None)
+        
+        if next_start is not None:
+            self.set_position(next_start)
+        else:
+            # 더 이상 우측에 시작점이 없으면 가장 처음(리스트의 첫 번째) 시작점으로 루프
+            self.set_position(starts[0])
+
+    def jump_to_end(self):
+        if not self.file_path: return
+        ends = [s[1] for s in self.segments]
+        # 현재 활성화된 끝점이 있다면 포함
+        if self.end_time > 0:
+            ends.append(self.end_time)
+            
+        if not ends:
+            if self.end_time > 0:
+                self.set_position(self.end_time)
+            return
+            
+        ends = sorted(list(set(ends)))
+        current_pos = self.media_player.position()
+        
+        # 현재 위치보다 큰(오른쪽에 있는) 첫 번째 끝점 찾기
+        next_end = next((e for e in ends if e > current_pos + 50), None)
+        
+        if next_end is not None:
+            self.set_position(next_end)
+        else:
+            # 더 이상 우측에 끝점이 없으면 가장 처음 끝점으로 루프
+            self.set_position(ends[0])
 
     def slider_pressed(self):
         self.is_slider_pressed = True
