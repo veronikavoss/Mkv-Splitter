@@ -35,4 +35,15 @@ if __name__ == "__main__":
     app.installEventFilter(drag_drop_filter)
     
     window.show()
+    
+    # Set global tooltip style
+    app.setStyleSheet("""
+        QToolTip {
+            color: white;
+            background-color: #2b2b2b;
+            border: 1px solid #767676;
+            padding: 4px;
+        }
+    """)
+    
     sys.exit(app.exec())

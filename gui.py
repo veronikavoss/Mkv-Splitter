@@ -4,11 +4,11 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QHBoxLayout, QPushButton, QSlider, QLabel, QFileDialog, QMessageBox, QStyle, QStyleOptionSlider, QListWidget, QAbstractItemView)
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
-from PySide6.QtCore import Qt, QUrl, QTime, QPoint, Signal, QObject, QEvent
+from PySide6.QtCore import Qt, QUrl, QTime, QPoint, Signal, QObject, QEvent, QSize
 
 import video_cutter
 
-from PySide6.QtGui import QPainter, QColor, QPolygon, QPen, QBrush
+from PySide6.QtGui import QPainter, QColor, QPolygon, QPen, QBrush, QIcon
 
 class ClickableVideoWidget(QVideoWidget):
     """
@@ -230,13 +230,87 @@ class MainWindow(QMainWindow):
         self.controls_layout = QHBoxLayout()
         self.layout.addLayout(self.controls_layout)
 
+        # Frame Pre Button (1 Frame Back)
+        self.frame_pre_icon = QIcon("assets/frame_pre.png")
+        self.frame_pre_button = QPushButton()
+        self.frame_pre_button.setIcon(self.frame_pre_icon)
+        self.frame_pre_button.setIconSize(QSize(42, 36))
+        self.frame_pre_button.setFixedSize(42, 36)
+        self.frame_pre_button.setStyleSheet("background-color: transparent; border: none;")
+        self.frame_pre_button.setToolTip("1프레임 뒤로")
+        self.frame_pre_button.clicked.connect(self.step_backward)
+        self.frame_pre_button.setEnabled(False)
+        self.controls_layout.addWidget(self.frame_pre_button)
+
+        # Pre Button (5s Back)
+        self.pre_icon = QIcon("assets/pre.png")
+        self.pre_button = QPushButton()
+        self.pre_button.setIcon(self.pre_icon)
+        self.pre_button.setIconSize(QSize(42, 36))
+        self.pre_button.setFixedSize(42, 36)
+        self.pre_button.setStyleSheet("background-color: transparent; border: none;")
+        self.pre_button.setToolTip("5초 뒤로")
+        self.pre_button.clicked.connect(self.skip_backward)
+        self.pre_button.setEnabled(False)
+        self.controls_layout.addWidget(self.pre_button)
+
         # Play/Pause Button
-        self.play_button = QPushButton("재생")
+        self.play_icon = QIcon("assets/play.png")
+        self.pause_icon = QIcon("assets/pause.png")
+        self.play_button = QPushButton()
+        self.play_button.setIcon(self.play_icon)
+        self.play_button.setIconSize(QSize(42, 36))
+        self.play_button.setFixedSize(42, 36)
+        self.play_button.setStyleSheet("background-color: transparent; border: none;")
+        self.play_button.setToolTip("재생")
         self.play_button.clicked.connect(self.toggle_play)
+        self.play_button.setEnabled(False) # 비활성화 기본값
         self.controls_layout.addWidget(self.play_button)
 
+        # Stop Button
+        self.stop_icon = QIcon("assets/stop.png")
+        self.stop_button = QPushButton()
+        self.stop_button.setIcon(self.stop_icon)
+        self.stop_button.setIconSize(QSize(42, 36))
+        self.stop_button.setFixedSize(42, 36)
+        self.stop_button.setStyleSheet("background-color: transparent; border: none;")
+        self.stop_button.setToolTip("정지 (초기화)")
+        self.stop_button.clicked.connect(self.stop_and_clear)
+        self.stop_button.setEnabled(False) # 비활성화 기본값
+        self.controls_layout.addWidget(self.stop_button)
+
+        # Next Button
+        self.next_icon = QIcon("assets/next.png")
+        self.next_button = QPushButton()
+        self.next_button.setIcon(self.next_icon)
+        self.next_button.setIconSize(QSize(42, 36))
+        self.next_button.setFixedSize(42, 36)
+        self.next_button.setStyleSheet("background-color: transparent; border: none;")
+        self.next_button.setToolTip("5초 앞으로")
+        self.next_button.clicked.connect(self.skip_forward)
+        self.next_button.setEnabled(False)
+        self.controls_layout.addWidget(self.next_button)
+
+        # Frame Next Button
+        self.frame_next_icon = QIcon("assets/frame_next.png")
+        self.frame_next_button = QPushButton()
+        self.frame_next_button.setIcon(self.frame_next_icon)
+        self.frame_next_button.setIconSize(QSize(42, 36))
+        self.frame_next_button.setFixedSize(42, 36)
+        self.frame_next_button.setStyleSheet("background-color: transparent; border: none;")
+        self.frame_next_button.setToolTip("1프레임 앞으로")
+        self.frame_next_button.clicked.connect(self.step_forward)
+        self.frame_next_button.setEnabled(False)
+        self.controls_layout.addWidget(self.frame_next_button)
+
         # Open File Button
-        self.open_button = QPushButton("파일 열기")
+        self.open_icon = QIcon("assets/open.png")
+        self.open_button = QPushButton()
+        self.open_button.setIcon(self.open_icon)
+        self.open_button.setIconSize(QSize(42, 36))
+        self.open_button.setFixedSize(42, 36)
+        self.open_button.setStyleSheet("background-color: transparent; border: none;")
+        self.open_button.setToolTip("파일 열기")
         self.open_button.clicked.connect(self.open_file)
         self.controls_layout.addWidget(self.open_button)
 
@@ -252,11 +326,23 @@ class MainWindow(QMainWindow):
         self.end_time = 0
         self.segments = [] # List of (start, end)
         
-        self.set_start_btn = QPushButton("시작점 [I]")
+        self.start_icon = QIcon("assets/start_point.png")
+        self.set_start_btn = QPushButton()
+        self.set_start_btn.setIcon(self.start_icon)
+        self.set_start_btn.setIconSize(QSize(42, 36))
+        self.set_start_btn.setFixedSize(42, 36)
+        self.set_start_btn.setStyleSheet("background-color: transparent; border: none;")
+        self.set_start_btn.setToolTip("시작점 [I]")
         self.set_start_btn.clicked.connect(self.set_start_mark)
         self.controls_layout.addWidget(self.set_start_btn)
         
-        self.set_end_btn = QPushButton("끝점 [O]")
+        self.end_icon = QIcon("assets/end_point.png")
+        self.set_end_btn = QPushButton()
+        self.set_end_btn.setIcon(self.end_icon)
+        self.set_end_btn.setIconSize(QSize(42, 36))
+        self.set_end_btn.setFixedSize(42, 36)
+        self.set_end_btn.setStyleSheet("background-color: transparent; border: none;")
+        self.set_end_btn.setToolTip("끝점 [O]")
         self.set_end_btn.clicked.connect(self.set_end_mark)
         self.controls_layout.addWidget(self.set_end_btn)
 
@@ -302,10 +388,42 @@ class MainWindow(QMainWindow):
         self.file_path = file_path
         self.media_player.setSource(QUrl.fromLocalFile(self.file_path))
         self.play_button.setEnabled(True)
+        self.stop_button.setEnabled(True)
+        self.pre_button.setEnabled(True)
+        self.frame_pre_button.setEnabled(True)
+        self.next_button.setEnabled(True)
+        self.frame_next_button.setEnabled(True)
         self.play_video()
         self.setWindowTitle(f"MKV Lossless Cutter - {os.path.basename(self.file_path)}")
         
         # Reset selection
+        self.start_time = 0
+        self.end_time = 0
+        self.segments = []
+        self.slider.set_segments(self.segments)
+        self.slider.set_current_selection(-1, -1)
+        self.update_cut_label()
+        self.check_export_ready()
+
+    def stop_and_clear(self):
+        self.media_player.stop()
+        self.media_player.setSource(QUrl())
+        self.file_path = None
+        self.play_button.setEnabled(False)
+        self.stop_button.setEnabled(False)
+        self.pre_button.setEnabled(False)
+        self.frame_pre_button.setEnabled(False)
+        self.next_button.setEnabled(False)
+        self.frame_next_button.setEnabled(False)
+        self.play_button.setIcon(self.play_icon)
+        self.setWindowTitle("MKV Lossless Cutter")
+        
+        # UI 및 타임라인 초기화
+        self.slider.setRange(0, 0)
+        self.slider.setValue(0)
+        self.time_label.setText("00:00:00 / 00:00:00")
+        
+        # 선택 구간 초기화
         self.start_time = 0
         self.end_time = 0
         self.segments = []
@@ -321,21 +439,55 @@ class MainWindow(QMainWindow):
             
         if self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             self.media_player.pause()
-            self.play_button.setText("재생")
+            self.play_button.setIcon(self.play_icon)
+            self.play_button.setToolTip("재생")
         else:
             self.media_player.play()
-            self.play_button.setText("일시정지")
+            self.play_button.setIcon(self.pause_icon)
+            self.play_button.setToolTip("일시정지")
 
     def play_video(self):
         self.media_player.play()
-        self.play_button.setText("일시정지")
+        self.play_button.setIcon(self.pause_icon)
+        self.play_button.setToolTip("일시정지")
 
     def pause_video(self):
         self.media_player.pause()
-        self.play_button.setText("재생")
+        self.play_button.setIcon(self.play_icon)
+        self.play_button.setToolTip("재생")
 
     def set_position(self, position):
         self.media_player.setPosition(position)
+
+    def step_backward(self):
+        if self.file_path:
+            # 1 프레임 이동 (대략 30fps 기준 ~33ms)
+            new_pos = max(0, self.media_player.position() - 33)
+            self.set_position(new_pos)
+
+    def skip_backward(self):
+        if self.file_path:
+            new_pos = max(0, self.media_player.position() - 5000)
+            self.set_position(new_pos)
+
+    def skip_forward(self):
+        if self.file_path:
+            duration = self.media_player.duration()
+            if duration > 0:
+                new_pos = min(duration, self.media_player.position() + 5000)
+            else:
+                new_pos = self.media_player.position() + 5000
+            self.set_position(new_pos)
+
+    def step_forward(self):
+        if self.file_path:
+            duration = self.media_player.duration()
+            # 1 프레임 이동 (대략 30fps 기준 ~33ms)
+            if duration > 0:
+                new_pos = min(duration, self.media_player.position() + 33)
+            else:
+                new_pos = self.media_player.position() + 33
+            self.set_position(new_pos)
 
     def slider_pressed(self):
         self.is_slider_pressed = True
@@ -345,7 +497,8 @@ class MainWindow(QMainWindow):
         self.is_slider_pressed = False
         self.set_position(self.slider.value())
         self.media_player.play()
-        self.play_button.setText("일시정지")
+        self.play_button.setIcon(self.pause_icon)
+        self.play_button.setToolTip("일시정지")
 
     def position_changed(self, position):
         # Update slider only if not currently being dragged by user
