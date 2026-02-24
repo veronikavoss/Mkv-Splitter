@@ -457,6 +457,7 @@ class MainWindow(QMainWindow):
 
         self.file_path = ""
         self.is_slider_pressed = False
+        self._was_playing_before_slider = False
         
         # Enable Drag and Drop (Handled by Global Filter in main.py)
         self.setAcceptDrops(True)
@@ -654,14 +655,20 @@ class MainWindow(QMainWindow):
 
     def slider_pressed(self):
         self.is_slider_pressed = True
+        self._was_playing_before_slider = (self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState)
         self.media_player.pause()
 
     def slider_released(self):
         self.is_slider_pressed = False
         self.set_position(self.slider.value())
-        self.media_player.play()
-        self.play_button.setIcon(self.pause_icon)
-        self.play_button.setToolTip("일시정지")
+        
+        if self._was_playing_before_slider:
+            self.media_player.play()
+            self.play_button.setIcon(self.pause_icon)
+            self.play_button.setToolTip("일시정지")
+        else:
+            self.play_button.setIcon(self.play_icon)
+            self.play_button.setToolTip("재생")
 
     def position_changed(self, position):
         # Update slider only if not currently being dragged by user
