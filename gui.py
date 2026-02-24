@@ -1,7 +1,8 @@
 import sys
 import os
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                               QHBoxLayout, QPushButton, QSlider, QLabel, QFileDialog, QMessageBox, QStyle, QStyleOptionSlider, QListWidget, QAbstractItemView)
+                               QHBoxLayout, QPushButton, QSlider, QLabel, QFileDialog, QMessageBox, QStyle, QStyleOptionSlider, QListWidget, QAbstractItemView,
+                               QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox, QFrame)
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtCore import Qt, QUrl, QTime, QPoint, Signal, QObject, QEvent, QSize
@@ -146,8 +147,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("MKV Lossless Cutter (한글 지원)")
-        self.resize(1000, 800) # Increased height for list
-
+        
         # Apply Modern Dark Theme
         self.setStyleSheet("""
             QMainWindow {
@@ -200,6 +200,23 @@ class MainWindow(QMainWindow):
             QSlider::handle:horizontal:hover {
                 background: #1e90ff;
             }
+            QTableWidget {
+                gridline-color: #777777;
+                border: 1px solid #777777;
+            }
+            QTableWidget::item {
+                border-right: 1px solid #777777;
+                border-bottom: 1px solid #777777;
+            }
+            QHeaderView::section {
+                background-color: #3d3d3d;
+                border: 1px solid #777777;
+                padding: 4px;
+            }
+            QListWidget {
+                border: 1px solid #777777;
+                background-color: #2b2b2b;
+            }
         """)
 
         # Media Player Setup
@@ -214,8 +231,9 @@ class MainWindow(QMainWindow):
 
         # Video Widget
         self.video_widget = ClickableVideoWidget(self.central_widget)
+        self.video_widget.setMinimumSize(1344, 756)
         self.video_widget.clicked.connect(self.toggle_play)
-        self.layout.addWidget(self.video_widget)
+        self.layout.addWidget(self.video_widget, stretch=1)
         self.media_player.setVideoOutput(self.video_widget)
 
         # Timeline Slider
@@ -371,14 +389,56 @@ class MainWindow(QMainWindow):
         self.clear_btn = QPushButton("선택 초기화")
         self.clear_btn.clicked.connect(self.clear_segments)
         self.controls_layout.addWidget(self.clear_btn)
-        
-        self.cut_label = QLabel("시작: - | 끝: -")
-        self.controls_layout.addWidget(self.cut_label)
 
         self.export_btn = QPushButton("내보내기")
         self.export_btn.clicked.connect(self.export_video)
         self.export_btn.setEnabled(False)
         self.controls_layout.addWidget(self.export_btn)
+
+        # Add Horizontal Line Separator
+        self.separator = QFrame()
+        self.separator.setFrameShape(QFrame.Shape.HLine)
+        self.separator.setFrameShadow(QFrame.Shadow.Sunken)
+        self.separator.setStyleSheet("background-color: #3d3d3d;")
+        self.layout.addWidget(self.separator)
+
+        # Tracks Table Widget
+        self.tracks_label = QLabel("트랙, 챕터와 태그 (T):")
+        self.tracks_label.setStyleSheet("font-weight: bold; margin-top: 8px; margin-bottom: 8px;")
+        self.layout.addWidget(self.tracks_label)
+        
+        self.tracks_table = QTableWidget(0, 9)
+        self.tracks_table.setHorizontalHeaderLabels([
+            "선택", "코덱", "유형", "항목 복사", "언어", "이름", "ID", "기본 트랙", "Forced display"
+        ])
+        
+        header = self.tracks_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(True)
+        self.tracks_table.verticalHeader().setVisible(False)
+        self.tracks_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.tracks_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.tracks_table.setShowGrid(True)
+        
+        # Limit height to show roughly 2-3 rows 
+        self.tracks_table.setMaximumHeight(100)
+        self.layout.addWidget(self.tracks_table)
+
+        # Add Horizontal Line Separator 2
+        self.separator2 = QFrame()
+        self.separator2.setFrameShape(QFrame.Shape.HLine)
+        self.separator2.setFrameShadow(QFrame.Shadow.Sunken)
+        self.separator2.setStyleSheet("background-color: #3d3d3d; margin-top: 4px; margin-bottom: 4px;")
+        self.layout.addWidget(self.separator2)
+
+        # Segments List Widget
+        self.segments_label = QLabel("선택된 자르기 구간 목록:")
+        self.segments_label.setStyleSheet("font-weight: bold; margin-top: 8px; margin-bottom: 8px;")
+        self.layout.addWidget(self.segments_label)
+        
+        self.segments_list = QListWidget()
+        self.segments_list.setMaximumHeight(100)
+        self.layout.addWidget(self.segments_list)
 
         # Signals
         self.media_player.positionChanged.connect(self.position_changed)
@@ -390,6 +450,21 @@ class MainWindow(QMainWindow):
         
         # Enable Drag and Drop (Handled by Global Filter in main.py)
         self.setAcceptDrops(True)
+        self._is_centered = False
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not self._is_centered:
+            self.center_on_screen()
+            self._is_centered = True
+
+    def center_on_screen(self):
+        screen = QApplication.primaryScreen()
+        if screen:
+            screen_geometry = screen.availableGeometry()
+            window_geometry = self.frameGeometry()
+            window_geometry.moveCenter(screen_geometry.center())
+            self.move(window_geometry.topLeft())
 
     def handle_dropped_file(self, file_path):
         valid_extensions = ['.mkv', '.mp4', '.avi']
@@ -426,7 +501,11 @@ class MainWindow(QMainWindow):
         self.segments = []
         self.slider.set_segments(self.segments)
         self.slider.set_current_selection(-1, -1)
-        self.update_cut_label()
+        self.update_segments_list()
+        
+        # Load tracks into table
+        self.load_tracks_to_table(self.file_path)
+        
         self.check_export_ready()
 
     def stop_and_clear(self):
@@ -455,7 +534,8 @@ class MainWindow(QMainWindow):
         self.segments = []
         self.slider.set_segments(self.segments)
         self.slider.set_current_selection(-1, -1)
-        self.update_cut_label()
+        self.update_segments_list()
+        self.tracks_table.setRowCount(0)
         self.check_export_ready()
 
     def toggle_play(self):
@@ -594,10 +674,18 @@ class MainWindow(QMainWindow):
         hours = (ms // 3600000)
         return f"{hours:02}:{minutes:02}:{seconds:02}"
 
-    def update_cut_label(self):
-        start_str = self.format_time(self.start_time) if self.start_time > 0 else "00:00:00"
-        end_str = self.format_time(self.end_time) if self.end_time > 0 else "-"
-        self.cut_label.setText(f"시작: {start_str} | 끝: {end_str}")
+    def update_segments_list(self):
+        self.segments_list.clear()
+        
+        # 우선 현재 마킹 중인 (저장 대기) 구간 표시
+        if self.start_time > 0 or self.end_time > 0:
+            start_str = self.format_time(self.start_time) if self.start_time > 0 else "00:00:00"
+            end_str = self.format_time(self.end_time) if self.end_time > 0 else "미지정"
+            self.segments_list.addItem(f"> 현재 활성화: {start_str} ~ {end_str}")
+            
+        # 저장된 전체 구간 리스트 표시
+        for i, (s, e) in enumerate(self.segments):
+            self.segments_list.addItem(f"구간 {i+1}: {self.format_time(s)} ~ {self.format_time(e)}")
 
     def check_export_ready(self):
         if len(self.segments) > 0 and self.file_path:
@@ -608,7 +696,7 @@ class MainWindow(QMainWindow):
     def set_start_mark(self):
         self.start_time = self.media_player.position()
         self.end_time = 0 # Reset end time for a new segment
-        self.update_cut_label()
+        self.update_segments_list()
         self.slider.set_current_selection(self.start_time, self.end_time)
         self.check_export_ready()
 
@@ -619,7 +707,7 @@ class MainWindow(QMainWindow):
              return
         
         self.end_time = current_pos
-        self.update_cut_label()
+        self.update_segments_list()
         
         # Save the segment
         self.segments.append((self.start_time, self.end_time))
@@ -629,7 +717,7 @@ class MainWindow(QMainWindow):
         # Reset current selection state so next 'start' can be made cleanly
         self.start_time = 0
         self.end_time = 0
-        self.update_cut_label()
+        self.update_segments_list()
         
         self.check_export_ready()
     def clear_segments(self):
@@ -638,8 +726,51 @@ class MainWindow(QMainWindow):
         self.end_time = 0
         self.slider.set_segments(self.segments)
         self.slider.set_current_selection(-1, -1)
-        self.update_cut_label()
+        self.update_segments_list()
         self.check_export_ready()
+
+    def load_tracks_to_table(self, file_path):
+        self.tracks_table.setRowCount(0)
+        tracks = video_cutter.get_media_tracks(file_path)
+        self.tracks_table.setRowCount(len(tracks))
+        
+        for row, track in enumerate(tracks):
+            # 0: 선택 (체크박스)
+            chk_item = QTableWidgetItem()
+            chk_item.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
+            chk_item.setCheckState(Qt.CheckState.Checked)
+            self.tracks_table.setItem(row, 0, chk_item)
+            
+            # 1: 코덱
+            self.tracks_table.setItem(row, 1, QTableWidgetItem(str(track.get('codec', ''))))
+            
+            # 2: 유형
+            type_str = track.get('type', '')
+            lbl = "비디오" if type_str == "video" else "오디오" if type_str == "audio" else "자막" if type_str == "subtitle" else type_str
+            self.tracks_table.setItem(row, 2, QTableWidgetItem(lbl))
+            
+            # 3: 항목 복사
+            self.tracks_table.setItem(row, 3, QTableWidgetItem("예"))
+            
+            # 4: 언어
+            self.tracks_table.setItem(row, 4, QTableWidgetItem(str(track.get('language', 'und'))))
+            
+            # 5: 이름
+            self.tracks_table.setItem(row, 5, QTableWidgetItem(str(track.get('title', ''))))
+            
+            # 6: ID
+            track_id = track.get('id', '')
+            id_item = QTableWidgetItem(str(track_id))
+            id_item.setData(Qt.ItemDataRole.UserRole, track_id)
+            self.tracks_table.setItem(row, 6, id_item)
+            
+            # 7: 기본 트랙
+            is_default = "예" if track.get('default') else "아니오"
+            self.tracks_table.setItem(row, 7, QTableWidgetItem(is_default))
+            
+            # 8: Forced display
+            is_forced = "예" if track.get('forced') else "아니오"
+            self.tracks_table.setItem(row, 8, QTableWidgetItem(is_forced))
 
     def export_video(self):
         if not self.file_path or not self.segments:
@@ -663,6 +794,15 @@ class MainWindow(QMainWindow):
             success_count = 0
             fail_messages = []
             
+            # 선택된 트랙 ID 수집
+            selected_track_ids = []
+            for row in range(self.tracks_table.rowCount()):
+                chk_item = self.tracks_table.item(row, 0)
+                id_item = self.tracks_table.item(row, 6)
+                if chk_item and id_item and chk_item.checkState() == Qt.CheckState.Checked:
+                    track_id = id_item.data(Qt.ItemDataRole.UserRole)
+                    selected_track_ids.append(track_id)
+            
             for i, (start_idx, end_idx) in enumerate(self.segments):
                 self.export_btn.setText(f"처리 중... ({i+1}/{total})")
                 QApplication.processEvents() # Force UI update
@@ -673,7 +813,7 @@ class MainWindow(QMainWindow):
                 else:
                     current_output = output_path
 
-                success, message = video_cutter.cut_video(self.file_path, start_idx, end_idx, current_output)
+                success, message = video_cutter.cut_video(self.file_path, start_idx, end_idx, current_output, selected_track_ids)
                 if success:
                     success_count += 1
                 else:
