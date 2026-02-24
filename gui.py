@@ -498,6 +498,10 @@ class MainWindow(QMainWindow):
         self.media_player.durationChanged.connect(self.duration_changed)
         self.media_player.errorOccurred.connect(self.handle_errors)
 
+        # Status Bar
+        self.statusBar().showMessage("준비 완료")
+        self.statusBar().setStyleSheet("color: #cccccc;")
+
         self.file_path = ""
         self.is_slider_pressed = False
         self._was_playing_before_slider = False
@@ -561,6 +565,7 @@ class MainWindow(QMainWindow):
         self.load_tracks_to_table(self.file_path)
         
         self.check_export_ready()
+        self.statusBar().showMessage(f"파일 불러옴: {os.path.basename(self.file_path)}")
 
     def stop_and_clear(self):
         self.media_player.stop()
@@ -591,6 +596,7 @@ class MainWindow(QMainWindow):
         self.update_segments_list()
         self.tracks_table.setRowCount(0)
         self.check_export_ready()
+        self.statusBar().showMessage("준비 완료")
 
     def toggle_play(self):
         if not self.file_path:
@@ -610,11 +616,13 @@ class MainWindow(QMainWindow):
         self.media_player.play()
         self.play_button.setIcon(self.pause_icon)
         self.play_button.setToolTip("일시정지")
+        self.statusBar().showMessage("재생")
 
     def pause_video(self):
         self.media_player.pause()
         self.play_button.setIcon(self.play_icon)
         self.play_button.setToolTip("재생")
+        self.statusBar().showMessage("일시정지")
 
     def toggle_mute(self):
         is_muted = not self.audio_output.isMuted()
@@ -623,9 +631,11 @@ class MainWindow(QMainWindow):
         if is_muted:
             self.volume_button.setIcon(self.volume_mute_icon)
             self.volume_button.setToolTip("음소거 해제")
+            self.statusBar().showMessage("음소거 설정됨")
         else:
             self.volume_button.setIcon(self.volume_icon)
             self.volume_button.setToolTip("음소거 토글")
+            self.statusBar().showMessage("음소거 해제됨")
 
     def set_volume(self, value):
         # value is 0-100
@@ -635,9 +645,11 @@ class MainWindow(QMainWindow):
         if value == 0:
             self.volume_button.setIcon(self.volume_mute_icon)
             self.audio_output.setMuted(True)
+            self.statusBar().showMessage("음소거 설정됨")
         else:
             self.volume_button.setIcon(self.volume_icon)
             self.audio_output.setMuted(False)
+            self.statusBar().showMessage(f"볼륨: {value}%")
             
     def set_position(self, position):
         self.media_player.setPosition(position)
@@ -647,11 +659,13 @@ class MainWindow(QMainWindow):
             # 1 프레임 이동 (대략 30fps 기준 ~33ms)
             new_pos = max(0, self.media_player.position() - 33)
             self.set_position(new_pos)
+            self.statusBar().showMessage("1프레임 뒤로")
 
     def skip_backward(self):
         if self.file_path:
             new_pos = max(0, self.media_player.position() - 5000)
             self.set_position(new_pos)
+            self.statusBar().showMessage("5초 뒤로")
 
     def skip_forward(self):
         if self.file_path:
@@ -661,6 +675,7 @@ class MainWindow(QMainWindow):
             else:
                 new_pos = self.media_player.position() + 5000
             self.set_position(new_pos)
+            self.statusBar().showMessage("5초 앞으로")
 
     def step_forward(self):
         if self.file_path:
@@ -671,6 +686,7 @@ class MainWindow(QMainWindow):
             else:
                 new_pos = self.media_player.position() + 33
             self.set_position(new_pos)
+            self.statusBar().showMessage("1프레임 앞으로")
 
     def jump_to_start(self):
         if not self.file_path: return
@@ -782,6 +798,7 @@ class MainWindow(QMainWindow):
         self.update_segments_list()
         self.slider.set_current_selection(self.start_time, self.end_time)
         self.check_export_ready()
+        self.statusBar().showMessage(f"시작 지점 설정됨: {self.format_time(self.start_time)}")
 
     def set_end_mark(self):
         current_pos = self.media_player.position()
@@ -803,6 +820,7 @@ class MainWindow(QMainWindow):
         self.update_segments_list()
         
         self.check_export_ready()
+        self.statusBar().showMessage(f"구간 임시 저장됨: {self.format_time(self.segments[-1][0])} ~ {self.format_time(self.segments[-1][1])}")
     def clear_segments(self):
         self.segments = []
         self.start_time = 0
@@ -811,6 +829,7 @@ class MainWindow(QMainWindow):
         self.slider.set_current_selection(-1, -1)
         self.update_segments_list()
         self.check_export_ready()
+        self.statusBar().showMessage("전체 자르기 구간이 초기화되었습니다.")
 
     def load_tracks_to_table(self, file_path):
         self.tracks_table.setRowCount(0)
@@ -888,6 +907,7 @@ class MainWindow(QMainWindow):
             
             for i, (start_idx, end_idx) in enumerate(self.segments):
                 self.export_btn.setText(f"처리 중... ({i+1}/{total})")
+                self.statusBar().showMessage(f"비디오 내보내기 진행 중... ({i+1}/{total})")
                 QApplication.processEvents() # Force UI update
                 
                 # Append number if there are multiple segments
@@ -907,8 +927,10 @@ class MainWindow(QMainWindow):
             self.export_btn.setText("내보내기")
 
             if success_count == total:
+                self.statusBar().showMessage(f"내보내기 완료 (성공: {total}개)")
                 QMessageBox.information(self, "성공", f"총 {total}개의 구간이 성공적으로 저장되었습니다.")
             else:
+                self.statusBar().showMessage(f"내보내기 완료 (성공: {success_count}/{total}개)")
                 QMessageBox.critical(self, "완료", f"{success_count}/{total}개 성공.\n실패 내역:\n" + "\n".join(fail_messages))
 
     def handle_errors(self):
