@@ -146,7 +146,7 @@ class SeekSlider(QSlider):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("MKV Lossless Cutter")
+        self.setWindowTitle("MKV Lossless Editor")
         
         # Apply Modern Dark Theme
         self.setStyleSheet("""
@@ -199,6 +199,29 @@ class MainWindow(QMainWindow):
             }
             QSlider::handle:horizontal:hover {
                 background: #1e90ff;
+            }
+            QSlider#volumeSlider::groove:horizontal {
+                height: 4px;
+                background: #555555;
+                margin: 0px 4px;
+                border-radius: 2px;
+            }
+            QSlider#volumeSlider::sub-page:horizontal {
+                background: gold;
+                border-radius: 2px;
+            }
+            QSlider#volumeSlider::add-page:horizontal {
+                background: transparent;
+            }
+            QSlider#volumeSlider::handle:horizontal {
+                background: #ffffff;
+                width: 12px;
+                height: 12px;
+                margin: -4px -4px;
+                border-radius: 6px;
+            }
+            QSlider#volumeSlider::handle:horizontal:hover {
+                background: gold;
             }
             QTableWidget {
                 gridline-color: #777777;
@@ -342,6 +365,26 @@ class MainWindow(QMainWindow):
         # Time Label
         self.time_label = QLabel("00:00:00 / 00:00:00")
         self.controls_layout.addWidget(self.time_label)
+        
+        # Volume Button & Slider
+        self.volume_icon = QIcon("assets/volume_max.png")
+        self.volume_mute_icon = QIcon("assets/volume_mute.png")
+        self.volume_button = QPushButton()
+        self.volume_button.setIcon(self.volume_icon)
+        self.volume_button.setIconSize(QSize(24, 24))
+        self.volume_button.setFixedSize(30, 30)
+        self.volume_button.setStyleSheet("background-color: transparent; border: none;")
+        self.volume_button.setToolTip("음소거 토글")
+        self.volume_button.clicked.connect(self.toggle_mute)
+        self.controls_layout.addWidget(self.volume_button)
+        
+        self.volume_slider = QSlider(Qt.Orientation.Horizontal)
+        self.volume_slider.setObjectName("volumeSlider")
+        self.volume_slider.setRange(0, 100)
+        self.volume_slider.setValue(100)
+        self.volume_slider.setFixedWidth(80)
+        self.volume_slider.valueChanged.connect(self.set_volume)
+        self.controls_layout.addWidget(self.volume_slider)
         
         # Spacer
         self.controls_layout.addStretch()
@@ -573,6 +616,29 @@ class MainWindow(QMainWindow):
         self.play_button.setIcon(self.play_icon)
         self.play_button.setToolTip("재생")
 
+    def toggle_mute(self):
+        is_muted = not self.audio_output.isMuted()
+        self.audio_output.setMuted(is_muted)
+        
+        if is_muted:
+            self.volume_button.setIcon(self.volume_mute_icon)
+            self.volume_button.setToolTip("음소거 해제")
+        else:
+            self.volume_button.setIcon(self.volume_icon)
+            self.volume_button.setToolTip("음소거 토글")
+
+    def set_volume(self, value):
+        # value is 0-100
+        linear_volume = value / 100.0
+        self.audio_output.setVolume(linear_volume)
+        
+        if value == 0:
+            self.volume_button.setIcon(self.volume_mute_icon)
+            self.audio_output.setMuted(True)
+        else:
+            self.volume_button.setIcon(self.volume_icon)
+            self.audio_output.setMuted(False)
+            
     def set_position(self, position):
         self.media_player.setPosition(position)
 
