@@ -146,7 +146,7 @@ class SeekSlider(QSlider):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("MKV Lossless Cutter (한글 지원)")
+        self.setWindowTitle("MKV Lossless Cutter")
         
         # Apply Modern Dark Theme
         self.setStyleSheet("""
@@ -203,15 +203,22 @@ class MainWindow(QMainWindow):
             QTableWidget {
                 gridline-color: #777777;
                 border: 1px solid #777777;
+                margin-top: 4px;
+                margin-bottom: 4px;
             }
             QTableWidget::item {
                 border-right: 1px solid #777777;
                 border-bottom: 1px solid #777777;
+                padding: 2px;
             }
             QHeaderView::section {
                 background-color: #3d3d3d;
                 border: 1px solid #777777;
-                padding: 4px;
+                font-weight: bold;
+                padding-top: 2px;
+                padding-bottom: 2px;
+                padding-left: 4px;
+                padding-right: 4px;
             }
             QListWidget {
                 border: 1px solid #777777;
@@ -403,13 +410,13 @@ class MainWindow(QMainWindow):
         self.layout.addWidget(self.separator)
 
         # Tracks Table Widget
-        self.tracks_label = QLabel("트랙, 챕터와 태그 (T):")
-        self.tracks_label.setStyleSheet("font-weight: bold; margin-top: 8px; margin-bottom: 8px;")
+        self.tracks_label = QLabel("트랙, 챕터와 태그")
+        self.tracks_label.setStyleSheet("color: gold; font-weight: bold; margin-top: 4px; margin-bottom: 4px;")
         self.layout.addWidget(self.tracks_label)
         
         self.tracks_table = QTableWidget(0, 9)
         self.tracks_table.setHorizontalHeaderLabels([
-            "선택", "코덱", "유형", "항목 복사", "언어", "이름", "ID", "기본 트랙", "Forced display"
+            "", "코덱", "유형", "항목 복사", "언어", "이름", "ID", "기본 트랙", "Forced display"
         ])
         
         header = self.tracks_table.horizontalHeader()
@@ -419,9 +426,12 @@ class MainWindow(QMainWindow):
         self.tracks_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tracks_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tracks_table.setShowGrid(True)
+        self.tracks_table.setColumnWidth(0, 30) # 최소 넓이로 체크박스만
+        self.tracks_table.verticalHeader().setDefaultSectionSize(24) # 셀 높이 압축
         
-        # Limit height to show roughly 2-3 rows 
-        self.tracks_table.setMaximumHeight(100)
+        # Limit height to show exactly 3 rows + header 
+        self.tracks_table.setMinimumHeight(100)
+        self.tracks_table.setMaximumHeight(120)
         self.layout.addWidget(self.tracks_table)
 
         # Add Horizontal Line Separator 2
@@ -432,8 +442,8 @@ class MainWindow(QMainWindow):
         self.layout.addWidget(self.separator2)
 
         # Segments List Widget
-        self.segments_label = QLabel("선택된 자르기 구간 목록:")
-        self.segments_label.setStyleSheet("font-weight: bold; margin-top: 8px; margin-bottom: 8px;")
+        self.segments_label = QLabel("선택된 자르기 구간 목록")
+        self.segments_label.setStyleSheet("color: gold; font-weight: bold; margin-top: 4px; margin-bottom: 4px;")
         self.layout.addWidget(self.segments_label)
         
         self.segments_list = QListWidget()

@@ -25,7 +25,7 @@ def get_media_tracks(file_path):
         file_path
     ]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True, encoding='utf-8', errors='ignore')
         data = json.loads(result.stdout)
         streams = data.get('streams', [])
         tracks = []
@@ -81,7 +81,7 @@ def cut_video(input_path, start_ms, end_ms, output_path, selected_track_ids=None
     
     try:
         # Run ffmpeg command
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True, encoding='utf-8', errors='ignore')
         return True, result.stdout
     except subprocess.CalledProcessError as e:
         return False, e.stderr
