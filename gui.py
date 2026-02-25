@@ -10,7 +10,7 @@ from PySide6.QtCore import Qt, QUrl, QTime, QPoint, Signal, QObject, QEvent, QSi
 
 import video_cutter
 
-from PySide6.QtGui import QPainter, QColor, QPolygon, QPen, QBrush, QIcon
+from PySide6.QtGui import QPainter, QColor, QPolygon, QPen, QBrush, QIcon, QShortcut, QKeySequence
 
 class ClickableVideoWidget(QVideoWidget):
     """
@@ -519,6 +519,14 @@ class MainWindow(QMainWindow):
         self.segments_list = QListWidget()
         self.segments_list.setMaximumHeight(100)
         self.segments_list.itemDoubleClicked.connect(self.seek_to_segment)
+        
+        # 단축키: 선택된 구간 삭제
+        self.delete_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Delete), self.segments_list)
+        self.delete_shortcut.setContext(Qt.ShortcutContext.WidgetShortcut)
+        self.delete_shortcut.activated.connect(self.delete_selected_segment)
+        
+        self.setup_shortcuts()
+        
         self.layout.addWidget(self.segments_list)
 
         # Signals
@@ -537,6 +545,28 @@ class MainWindow(QMainWindow):
         # Enable Drag and Drop (Handled by Global Filter in main.py)
         self.setAcceptDrops(True)
         self._is_centered = False
+
+    def setup_shortcuts(self):
+        self.app_shortcuts = []
+        def add_shortcut(key, func):
+            shortcut = QShortcut(QKeySequence(key), self)
+            shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+            shortcut.activated.connect(func)
+            self.app_shortcuts.append(shortcut)
+            
+        add_shortcut(Qt.Key.Key_Left, self.skip_backward)
+        add_shortcut(Qt.Key.Key_Right, self.skip_forward)
+        add_shortcut(Qt.Key.Key_Up, self.volume_up)
+        add_shortcut(Qt.Key.Key_Down, self.volume_down)
+        add_shortcut(Qt.Key.Key_M, self.toggle_mute)
+        add_shortcut(Qt.Key.Key_F, self.step_forward)
+        add_shortcut(Qt.Key.Key_D, self.step_backward)
+        add_shortcut(Qt.Key.Key_BracketLeft, self.set_start_mark)
+        add_shortcut(Qt.Key.Key_BracketRight, self.set_end_mark)
+        add_shortcut(Qt.Key.Key_Comma, self.jump_to_start)
+        add_shortcut(Qt.Key.Key_Period, self.jump_to_end)
+        add_shortcut(Qt.Key.Key_Space, self.toggle_play)
+        add_shortcut(Qt.Key.Key_Escape, self.stop_playback)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -664,6 +694,25 @@ class MainWindow(QMainWindow):
             self.volume_button.setIcon(self.volume_icon)
             self.volume_button.setToolTip("음소거 토글")
             self.statusBar().showMessage("음소거 해제됨")
+
+    def volume_up(self):
+        val = min(100, self.volume_slider.value() + 5)
+        self.volume_slider.setValue(val)
+        self.set_volume(val)
+        
+    def volume_down(self):
+        val = max(0, self.volume_slider.value() - 5)
+        self.volume_slider.setValue(val)
+        self.set_volume(val)
+
+    def stop_playback(self):
+        if self.file_path:
+            self.media_player.stop()
+            self.set_position(0)
+            self.slider.setValue(0)
+            self.play_button.setIcon(self.play_icon)
+            self.play_button.setToolTip("재생")
+            self.statusBar().showMessage("정지됨")
 
     def set_volume(self, value):
         # value is 0-100
@@ -844,6 +893,34 @@ class MainWindow(QMainWindow):
             self.set_position(start_ms)
             self.slider.setValue(start_ms)
             self.statusBar().showMessage(f"구간 시작점으로 이동: {self.format_time(start_ms)}")
+
+    def delete_selected_segment(self):
+        selected_items = self.segments_list.selectedItems()
+        if not selected_items: return
+        item = selected_items[0]
+        row = self.segments_list.row(item)
+        text = item.text()
+        
+        if "> 현재 활성화" in text:
+            # 현재 활성화된 마커 취소
+            self.start_time = 0
+            self.end_time = 0
+            self.slider.set_current_selection(-1, -1)
+            self.statusBar().showMessage("현재 임시 설정 구간이 취소/삭제 되었습니다.")
+        else:
+            # 저장된 구간 삭제. offset 확인 필요.
+            list_idx = row
+            if self.segments_list.count() > len(self.segments):
+                # 활성화 마커가 맨 윗줄에 표시되는 경우
+                list_idx -= 1
+                
+            if 0 <= list_idx < len(self.segments):
+                self.segments.pop(list_idx)
+                self.slider.set_segments(self.segments)
+                self.statusBar().showMessage(f"구간 {list_idx+1} 항목이 삭제되었습니다.")
+
+        self.update_segments_list()
+        self.check_export_ready()
 
     def check_export_ready(self):
         if len(self.segments) > 0 and self.file_path:
