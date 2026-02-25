@@ -498,6 +498,7 @@ class MainWindow(QMainWindow):
         self.tracks_table.setShowGrid(True)
         self.tracks_table.setColumnWidth(0, 30) # 최소 넓이로 체크박스만
         self.tracks_table.verticalHeader().setDefaultSectionSize(24) # 셀 높이 압축
+        self.tracks_table.itemChanged.connect(self.check_export_ready)
         
         # Limit height to show exactly 3 rows + header 
         self.tracks_table.setMinimumHeight(100)
@@ -922,11 +923,33 @@ class MainWindow(QMainWindow):
         self.update_segments_list()
         self.check_export_ready()
 
-    def check_export_ready(self):
-        if len(self.segments) > 0 and self.file_path:
-            self.export_btn.setEnabled(True)
-        else:
+    def check_export_ready(self, item=None):
+        if not self.file_path:
             self.export_btn.setEnabled(False)
+            return
+
+        ready = False
+        
+        if len(self.segments) > 0:
+            ready = True
+        else:
+            # 구간 자르기가 없을 경우, 트랙 선택창 변화(일부 해제) 감지
+            all_checked = True
+            any_checked = False
+            for row in range(self.tracks_table.rowCount()):
+                chk_item = self.tracks_table.item(row, 0)
+                if chk_item:
+                    is_checked = (chk_item.checkState() == Qt.CheckState.Checked)
+                    if not is_checked:
+                        all_checked = False
+                    else:
+                        any_checked = True
+            
+            # 모두 선택된 상태가 아니고(변경점 있음) 최소 하나라도 선택(추출)되었다면
+            if not all_checked and any_checked:
+                ready = True
+
+        self.export_btn.setEnabled(ready)
 
     def set_start_mark(self):
         self.start_time = self.media_player.position()
@@ -1011,13 +1034,36 @@ class MainWindow(QMainWindow):
             self.tracks_table.setItem(row, 8, QTableWidgetItem(is_forced))
 
     def export_video(self):
-        if not self.file_path or not self.segments:
+        # 1. 상태 파악
+        has_segments = len(self.segments) > 0
+        has_track_changes = False
+        selected_track_ids = []
+        any_checked = False
+        
+        if self.file_path:
+            for row in range(self.tracks_table.rowCount()):
+                chk_item = self.tracks_table.item(row, 0)
+                id_item = self.tracks_table.item(row, 6)
+                if chk_item and id_item:
+                    is_checked = (chk_item.checkState() == Qt.CheckState.Checked)
+                    if not is_checked:
+                        has_track_changes = True
+                    if is_checked:
+                        any_checked = True
+                        selected_track_ids.append(id_item.data(Qt.ItemDataRole.UserRole))
+
+        # 2. 내보낼 대상이 아예 없으면 거부
+        if not self.file_path or (not has_segments and not (has_track_changes and any_checked)):
             return
 
         # Generate default output filename base
         dir_name = os.path.dirname(self.file_path)
         base_name = os.path.splitext(os.path.basename(self.file_path))[0]
-        default_output = os.path.join(dir_name, f"{base_name}_cut.mkv")
+        
+        if not has_segments:
+            default_output = os.path.join(dir_name, f"{base_name}_extracted.mkv")
+        else:
+            default_output = os.path.join(dir_name, f"{base_name}_cut.mkv")
 
         output_path, _ = QFileDialog.getSaveFileName(self, "저장할 파일 선택 (기본 이름으로 _1, _2 ... 자동 생성됨)", default_output, "MKV Files (*.mkv);;All Files (*)")
         
@@ -1028,20 +1074,13 @@ class MainWindow(QMainWindow):
             output_dir = os.path.dirname(output_path)
             output_base, output_ext = os.path.splitext(os.path.basename(output_path))
             
-            total = len(self.segments)
+            # 구간이 없으면 원본의 전체 길이를 추출 대상으로 간주
+            process_segments = self.segments if has_segments else [(0, self.media_player.duration())]
+            total = len(process_segments)
             success_count = 0
             fail_messages = []
             
-            # 선택된 트랙 ID 수집
-            selected_track_ids = []
-            for row in range(self.tracks_table.rowCount()):
-                chk_item = self.tracks_table.item(row, 0)
-                id_item = self.tracks_table.item(row, 6)
-                if chk_item and id_item and chk_item.checkState() == Qt.CheckState.Checked:
-                    track_id = id_item.data(Qt.ItemDataRole.UserRole)
-                    selected_track_ids.append(track_id)
-            
-            for i, (start_idx, end_idx) in enumerate(self.segments):
+            for i, (start_idx, end_idx) in enumerate(process_segments):
                 self.export_btn.setText(f"처리 중... ({i+1}/{total})")
                 self.statusBar().showMessage(f"비디오 내보내기 진행 중... ({i+1}/{total})")
                 QApplication.processEvents() # Force UI update
