@@ -1,7 +1,8 @@
 import sys
 import os
+import ctypes
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                               QHBoxLayout, QPushButton, QSlider, QLabel, QFileDialog, QMessageBox, QStyle, QStyleOptionSlider, QListWidget, QAbstractItemView,
+                               QHBoxLayout, QPushButton, QSlider, QLabel, QFileDialog, QMessageBox, QStyle, QStyleOptionSlider, QListWidget, QListWidgetItem, QAbstractItemView,
                                QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox, QFrame)
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
@@ -147,6 +148,22 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("MKV Lossless Editor")
+        self.setWindowIcon(QIcon("assets/app_icon.png"))
+        
+        # Apply Dark Mode to Windows Title Bar
+        try:
+            hwnd = self.winId()
+            # 20 is DWMWA_USE_IMMERSIVE_DARK_MODE in Windows 11 (and newer Win 10)
+            # 19 was used in older Win 10 versions. We try 20 first, then 19.
+            DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+            set_window_attribute = ctypes.windll.dwmapi.DwmSetWindowAttribute
+            rendering_policy = ctypes.c_int(1)
+            result = set_window_attribute(int(hwnd), DWMWA_USE_IMMERSIVE_DARK_MODE, ctypes.byref(rendering_policy), ctypes.sizeof(rendering_policy))
+            if result != 0:
+                DWMWA_USE_IMMERSIVE_DARK_MODE_OLD = 19
+                set_window_attribute(int(hwnd), DWMWA_USE_IMMERSIVE_DARK_MODE_OLD, ctypes.byref(rendering_policy), ctypes.sizeof(rendering_policy))
+        except Exception:
+            pass
         
         # Apply Modern Dark Theme
         self.setStyleSheet("""
@@ -246,6 +263,16 @@ class MainWindow(QMainWindow):
             QListWidget {
                 border: 1px solid #777777;
                 background-color: #2b2b2b;
+            }
+            QListWidget::item {
+                padding: 4px;
+            }
+            QListWidget::item:hover {
+                background-color: #3d3d3d;
+            }
+            QListWidget::item:selected {
+                background-color: #0078d7;
+                color: #ffffff;
             }
         """)
 
@@ -491,6 +518,7 @@ class MainWindow(QMainWindow):
         
         self.segments_list = QListWidget()
         self.segments_list.setMaximumHeight(100)
+        self.segments_list.itemDoubleClicked.connect(self.seek_to_segment)
         self.layout.addWidget(self.segments_list)
 
         # Signals
@@ -780,11 +808,42 @@ class MainWindow(QMainWindow):
         if self.start_time > 0 or self.end_time > 0:
             start_str = self.format_time(self.start_time) if self.start_time > 0 else "00:00:00"
             end_str = self.format_time(self.end_time) if self.end_time > 0 else "미지정"
-            self.segments_list.addItem(f"> 현재 활성화: {start_str} ~ {end_str}")
+            item = QListWidgetItem(f"> 현재 활성화: {start_str} ~ {end_str}")
+            item.setData(Qt.ItemDataRole.UserRole, int(self.start_time))
+            self.segments_list.addItem(item)
             
         # 저장된 전체 구간 리스트 표시
         for i, (s, e) in enumerate(self.segments):
-            self.segments_list.addItem(f"구간 {i+1}: {self.format_time(s)} ~ {self.format_time(e)}")
+            item = QListWidgetItem(f"구간 {i+1}: {self.format_time(s)} ~ {self.format_time(e)}")
+            item.setData(Qt.ItemDataRole.UserRole, int(s))
+            self.segments_list.addItem(item)
+
+    def seek_to_segment(self, item):
+        start_ms = item.data(Qt.ItemDataRole.UserRole)
+        # Type casting to int to be safe
+        try:
+            start_ms = int(start_ms) if start_ms is not None else None
+        except (ValueError, TypeError):
+            start_ms = None
+            
+        # Fallback parsing directly from the item's text if UserRole failed to retrieve
+        if start_ms is None:
+            text = item.text()
+            # 예: "구간 1: 00:00:10 ~ 00:00:20" 또는 "> 현재 활성화: 00:00:10 ~ 미지정"
+            if ": " in text and " ~ " in text:
+                try:
+                    time_part = text.split(": ", 1)[1].split(" ~ ")[0]
+                    parts = time_part.split(":")
+                    if len(parts) == 3:
+                        h, m, s = map(int, parts)
+                        start_ms = (h * 3600 + m * 60 + s) * 1000
+                except Exception:
+                    pass
+            
+        if start_ms is not None and self.file_path:
+            self.set_position(start_ms)
+            self.slider.setValue(start_ms)
+            self.statusBar().showMessage(f"구간 시작점으로 이동: {self.format_time(start_ms)}")
 
     def check_export_ready(self):
         if len(self.segments) > 0 and self.file_path:
