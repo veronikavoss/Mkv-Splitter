@@ -475,6 +475,11 @@ class MainWindow(QMainWindow):
         self.clear_btn.clicked.connect(self.clear_segments)
         self.controls_layout.addWidget(self.clear_btn)
 
+        self.merge_checkbox = QCheckBox("다중 구간 병합 (Merge)")
+        self.merge_checkbox.setStyleSheet("color: #cccccc;")
+        self.merge_checkbox.setEnabled(False)
+        self.controls_layout.addWidget(self.merge_checkbox)
+
         self.export_btn = QPushButton("내보내기")
         self.export_btn.clicked.connect(self.export_video)
         self.export_btn.setEnabled(False)
@@ -952,7 +957,15 @@ class MainWindow(QMainWindow):
         
         if len(self.segments) > 0:
             ready = True
+            if len(self.segments) > 1:
+                self.merge_checkbox.setEnabled(True)
+            else:
+                self.merge_checkbox.setEnabled(False)
+                self.merge_checkbox.setChecked(False)
         else:
+            self.merge_checkbox.setEnabled(False)
+            self.merge_checkbox.setChecked(False)
+            
             # 구간 자르기가 없을 경우, 트랙 선택창 변화(일부 해제) 감지
             all_checked = True
             any_checked = False
@@ -1100,13 +1113,18 @@ class MainWindow(QMainWindow):
             success_count = 0
             fail_messages = []
             
+            do_merge = self.merge_checkbox.isChecked() and total > 1
+            generated_files = []
+            
             for i, (start_idx, end_idx) in enumerate(process_segments):
                 self.export_btn.setText(f"처리 중... ({i+1}/{total})")
                 self.statusBar().showMessage(f"비디오 내보내기 진행 중... ({i+1}/{total})")
                 QApplication.processEvents() # Force UI update
                 
                 # Append number if there are multiple segments
-                if total > 1:
+                if do_merge:
+                    current_output = os.path.join(output_dir, f"{output_base}_temp_part{i+1}{output_ext}")
+                elif total > 1:
                     current_output = os.path.join(output_dir, f"{output_base}_{i+1}{output_ext}")
                 else:
                     current_output = output_path
@@ -1114,16 +1132,36 @@ class MainWindow(QMainWindow):
                 success, message = video_cutter.cut_video(self.file_path, start_idx, end_idx, current_output, selected_track_ids)
                 if success:
                     success_count += 1
+                    if do_merge: generated_files.append(current_output)
                 else:
                     fail_messages.append(f"구간 {i+1}: {message}")
             
+            if do_merge and success_count == total and len(generated_files) > 1:
+                self.statusBar().showMessage("조각 파일들을 하나로 병합하는 중...")
+                self.export_btn.setText("병합 중...")
+                QApplication.processEvents()
+                
+                merged_output_path = output_path
+                merge_success, merge_msg = video_cutter.merge_videos(generated_files, merged_output_path)
+                
+                # delete temp files
+                for f in generated_files:
+                    try:
+                        if os.path.exists(f): os.remove(f)
+                    except:
+                        pass
+                        
+                if not merge_success:
+                    fail_messages.append(f"병합 실패: {merge_msg}")
+                    success_count = 0
+
             self.play_button.setEnabled(True)
             self.export_btn.setEnabled(True)
             self.export_btn.setText("내보내기")
 
-            if success_count == total:
+            if success_count == total and not fail_messages:
                 self.statusBar().showMessage(f"내보내기 완료 (성공: {total}개)")
-                QMessageBox.information(self, "성공", f"총 {total}개의 구간이 성공적으로 저장되었습니다.")
+                QMessageBox.information(self, "성공", "작업이 성공적으로 저장되었습니다.")
             else:
                 self.statusBar().showMessage(f"내보내기 완료 (성공: {success_count}/{total}개)")
                 QMessageBox.critical(self, "완료", f"{success_count}/{total}개 성공.\n실패 내역:\n" + "\n".join(fail_messages))

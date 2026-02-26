@@ -87,3 +87,51 @@ def cut_video(input_path, start_ms, end_ms, output_path, selected_track_ids=None
         return False, e.stderr
     except FileNotFoundError:
         return False, "FFmpeg binary not found. Please ensure FFmpeg is installed and in your PATH."
+
+def merge_videos(input_files, output_path):
+    """
+    Merges multiple video files into a single file using ffmpeg concat demuxer.
+    Uses -c copy for lossless and fast merging.
+    """
+    if not input_files:
+        return False, "No input files provided for merging."
+
+    # Create a temporary concat list file
+    list_file_path = output_path + ".txt"
+    try:
+        with open(list_file_path, 'w', encoding='utf-8') as f:
+            for file_path in input_files:
+                # Escape single quotes and backslashes for ffmpeg concat file syntax
+                safe_path = file_path.replace("\\", "/").replace("'", "'\\''")
+                f.write(f"file '{safe_path}'\n")
+    except Exception as e:
+        return False, f"Failed to create concat list file: {e}"
+
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-f", "concat",
+        "-safe", "0",
+        "-i", list_file_path,
+        "-c", "copy",
+        output_path
+    ]
+
+    print(f"Running command: {' '.join(cmd)}")
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True, encoding='utf-8', errors='ignore')
+        # Clean up the list file after successful run
+        if os.path.exists(list_file_path):
+            os.remove(list_file_path)
+        return True, result.stdout
+    except subprocess.CalledProcessError as e:
+        return False, e.stderr
+    except FileNotFoundError:
+        return False, "FFmpeg binary not found."
+    finally:
+        if os.path.exists(list_file_path):
+            try:
+                os.remove(list_file_path)
+            except:
+                pass
