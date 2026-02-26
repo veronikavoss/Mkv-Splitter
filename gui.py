@@ -17,12 +17,19 @@ class ClickableVideoWidget(QVideoWidget):
     A custom QVideoWidget that emits a clicked signal on mouse press.
     """
     clicked = Signal()
+    doubleClicked = Signal()
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit()
             event.accept()
         super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.doubleClicked.emit()
+            event.accept()
+        super().mouseDoubleClickEvent(event)
 
 class SeekSlider(QSlider):
     """
@@ -290,6 +297,7 @@ class MainWindow(QMainWindow):
         self.video_widget = ClickableVideoWidget(self.central_widget)
         self.video_widget.setMinimumSize(1344, 756)
         self.video_widget.clicked.connect(self.toggle_play)
+        self.video_widget.doubleClicked.connect(self.toggle_fullscreen)
         self.layout.addWidget(self.video_widget, stretch=1)
         self.media_player.setVideoOutput(self.video_widget)
 
@@ -583,6 +591,14 @@ class MainWindow(QMainWindow):
             window_geometry.moveCenter(screen_geometry.center())
             self.move(window_geometry.topLeft())
 
+    def toggle_fullscreen(self):
+        if self.isFullScreen():
+            self.showNormal()
+            self.statusBar().showMessage("기본 화면으로 복귀")
+        else:
+            self.showFullScreen()
+            self.statusBar().showMessage("전체 화면 모드")
+
     def handle_dropped_file(self, file_path):
         valid_extensions = ['.mkv', '.mp4', '.avi']
         if os.path.splitext(file_path)[1].lower() in valid_extensions:
@@ -707,6 +723,10 @@ class MainWindow(QMainWindow):
         self.set_volume(val)
 
     def stop_playback(self):
+        if self.isFullScreen():
+            self.toggle_fullscreen()
+            return
+
         if self.file_path:
             self.media_player.stop()
             self.set_position(0)
