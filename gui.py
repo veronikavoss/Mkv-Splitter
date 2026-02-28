@@ -525,23 +525,44 @@ class MainWindow(QMainWindow):
         self.separator2.setStyleSheet("background-color: #3d3d3d; margin-top: 4px; margin-bottom: 4px;")
         self.layout.addWidget(self.separator2)
 
-        # Segments List Widget
+        # Bottom Lists Layout (Horizontal Split)
+        self.bottom_lists_layout = QHBoxLayout()
+        self.layout.addLayout(self.bottom_lists_layout)
+
+        # --- Left: Segments List Widget ---
+        self.segments_layout = QVBoxLayout()
         self.segments_label = QLabel("선택된 자르기 구간 목록")
         self.segments_label.setStyleSheet("color: gold; font-weight: bold; margin-top: 4px; margin-bottom: 4px;")
-        self.layout.addWidget(self.segments_label)
+        self.segments_layout.addWidget(self.segments_label)
         
         self.segments_list = QListWidget()
-        self.segments_list.setMaximumHeight(100)
+        self.segments_list.setFixedHeight(75)
         self.segments_list.itemDoubleClicked.connect(self.seek_to_segment)
         
-        # 단축키: 선택된 구간 삭제
         self.delete_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Delete), self.segments_list)
         self.delete_shortcut.setContext(Qt.ShortcutContext.WidgetShortcut)
         self.delete_shortcut.activated.connect(self.delete_selected_segment)
         
-        self.setup_shortcuts()
+        self.segments_layout.addWidget(self.segments_list)
+        self.bottom_lists_layout.addLayout(self.segments_layout)
+
+        # --- Right: Multi-Merge Queue Widget ---
+        self.merge_queue_layout = QVBoxLayout()
+        self.merge_queue_label = QLabel("다중 파일 병합 대기열")
+        self.merge_queue_label.setStyleSheet("color: gold; font-weight: bold; margin-top: 4px; margin-bottom: 4px;")
+        self.merge_queue_layout.addWidget(self.merge_queue_label)
         
-        self.layout.addWidget(self.segments_list)
+        self.merge_queue_list = QListWidget()
+        self.merge_queue_list.setFixedHeight(75)
+        
+        self.merge_delete_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Delete), self.merge_queue_list)
+        self.merge_delete_shortcut.setContext(Qt.ShortcutContext.WidgetShortcut)
+        self.merge_delete_shortcut.activated.connect(self.delete_merge_queue_item)
+        
+        self.merge_queue_layout.addWidget(self.merge_queue_list)
+        self.bottom_lists_layout.addLayout(self.merge_queue_layout)
+        
+        self.setup_shortcuts()
 
         # Signals
         self.media_player.positionChanged.connect(self.position_changed)
@@ -555,6 +576,8 @@ class MainWindow(QMainWindow):
         self.file_path = ""
         self.is_slider_pressed = False
         self._was_playing_before_slider = False
+        self.is_multi_merge_mode = False
+        self.multi_merge_files = []
         
         # Enable Drag and Drop (Handled by Global Filter in main.py)
         self.setAcceptDrops(True)
@@ -604,20 +627,51 @@ class MainWindow(QMainWindow):
             self.showFullScreen()
             self.statusBar().showMessage("전체 화면 모드")
 
-    def handle_dropped_file(self, file_path):
+    def handle_dropped_files(self, file_paths):
         valid_extensions = ['.mkv', '.mp4', '.avi']
-        if os.path.splitext(file_path)[1].lower() in valid_extensions:
-            self.load_file(file_path)
+        valid_files = [f for f in file_paths if os.path.splitext(f)[1].lower() in valid_extensions]
+        
+        if not valid_files:
+            QMessageBox.warning(self, "지원하지 않는 파일", "비디오 파일(.mkv, .mp4, .avi)만 열 수 있습니다.")
+            return
+
+        if len(valid_files) == 1:
+            self.load_file(valid_files[0])
         else:
-            QMessageBox.warning(self, "지원하지 않는 파일", f"비디오 파일(.mkv, .mp4, .avi)만 열 수 있습니다.\n입력 파일: {file_path}")
+            self.load_multi_files(valid_files)
 
     def open_file(self):
         file_dialog = QFileDialog(self)
         file_dialog.setNameFilters(["Video files (*.mkv *.mp4 *.avi)"])
+        file_dialog.setFileMode(QFileDialog.FileMode.ExistingFiles)
         if file_dialog.exec():
             files = file_dialog.selectedFiles()
             if files:
-                self.load_file(files[0])
+                if len(files) == 1:
+                    self.load_file(files[0])
+                else:
+                    self.load_multi_files(files)
+
+    def load_multi_files(self, files):
+        self.stop_and_clear()
+        self.is_multi_merge_mode = True
+        self.multi_merge_files = files
+        
+        self.merge_queue_list.clear() # 우측 새 위젯 사용
+        
+        for i, f in enumerate(files):
+            item = QListWidgetItem(f"{i+1}. {os.path.basename(f)}")
+            item.setData(Qt.ItemDataRole.UserRole, f)
+            self.merge_queue_list.addItem(item)
+            
+        self.setWindowTitle("MKV Lossless Cutter - 다중 파일 병합 모드")
+        self.export_btn.setEnabled(True)
+        self.export_btn.setText("병합 시작")
+        self.statusBar().showMessage(f"{len(files)}개의 파일이 병합 대기열에 추가되었습니다.")
+
+        self.play_button.setEnabled(False)
+        self.stop_button.setEnabled(True)
+        self.slider.setEnabled(False)
 
     def load_file(self, file_path):
         self.file_path = file_path
@@ -648,6 +702,12 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"파일 불러옴: {os.path.basename(self.file_path)}")
 
     def stop_and_clear(self):
+        self.is_multi_merge_mode = False
+        self.multi_merge_files = []
+        self.merge_queue_list.clear()
+        self.export_btn.setText("내보내기")
+        self.slider.setEnabled(True)
+
         self.media_player.stop()
         self.media_player.setSource(QUrl())
         self.file_path = None
@@ -948,6 +1008,29 @@ class MainWindow(QMainWindow):
         self.update_segments_list()
         self.check_export_ready()
 
+    def delete_merge_queue_item(self):
+        if not self.is_multi_merge_mode: return
+        selected_items = self.merge_queue_list.selectedItems()
+        if not selected_items: return
+        
+        for item in selected_items:
+            row = self.merge_queue_list.row(item)
+            self.merge_queue_list.takeItem(row)
+            self.multi_merge_files.pop(row)
+            
+        # 순번 텍스트 재정렬
+        for i in range(self.merge_queue_list.count()):
+            item = self.merge_queue_list.item(i)
+            # Remove the old prefix like "1. "
+            text = item.text()
+            parts = text.split(". ", 1)
+            filename = parts[1] if len(parts) > 1 else text
+            item.setText(f"{i+1}. {filename}")
+            
+        self.statusBar().showMessage(f"병합 대기열 항목이 삭제되었습니다. (남은 파일: {len(self.multi_merge_files)}개)")
+        if len(self.multi_merge_files) < 2:
+            self.export_btn.setEnabled(False)
+
     def check_export_ready(self, item=None):
         if not self.file_path:
             self.export_btn.setEnabled(False)
@@ -1067,7 +1150,34 @@ class MainWindow(QMainWindow):
             self.tracks_table.setItem(row, 8, QTableWidgetItem(is_forced))
 
     def export_video(self):
-        # 1. 상태 파악
+        # 다중 파일 병합 모드일 경우 즉시 병합 로직만 수행
+        if self.is_multi_merge_mode and len(self.multi_merge_files) > 1:
+            first_file = self.multi_merge_files[0]
+            dir_name = os.path.dirname(first_file)
+            base_name = os.path.splitext(os.path.basename(first_file))[0]
+            default_output = os.path.join(dir_name, f"{base_name}_merged.mkv")
+            
+            output_path, _ = QFileDialog.getSaveFileName(self, "병합 파일 저장", default_output, "MKV Files (*.mkv);;All Files (*)")
+            if output_path:
+                self.export_btn.setEnabled(False)
+                self.export_btn.setText("병합 중...")
+                self.statusBar().showMessage("다중 파일 병합 처리 중...")
+                QApplication.processEvents()
+                
+                success, msg = video_cutter.merge_videos(self.multi_merge_files, output_path)
+                
+                self.export_btn.setEnabled(True)
+                self.export_btn.setText("병합 시작")
+                
+                if success:
+                    self.statusBar().showMessage("병합 완료!")
+                    QMessageBox.information(self, "성공", "파일 병합이 성공적으로 완료되었습니다.")
+                else:
+                    self.statusBar().showMessage("병합 실패")
+                    QMessageBox.critical(self, "실패", f"병합 중 오류가 발생했습니다:\n{msg}")
+            return
+            
+        # 1. 단일 파일 기본 자르기 상태 파악
         has_segments = len(self.segments) > 0
         has_track_changes = False
         selected_track_ids = []

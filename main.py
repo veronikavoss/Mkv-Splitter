@@ -18,11 +18,14 @@ class GlobalDragDropFilter(QObject):
                 event.acceptProposedAction()
                 urls = event.mimeData().urls()
                 if urls:
-                    file_path = urls[0].toLocalFile()
-                    if not file_path:
-                        file_path = urls[0].toString().replace('file:///', '')
-                    if self.main_window:
-                        self.main_window.handle_dropped_file(file_path)
+                    file_paths = []
+                    for url in urls:
+                        path = url.toLocalFile()
+                        if not path:
+                            path = url.toString().replace('file:///', '')
+                        file_paths.append(path)
+                    if self.main_window and file_paths:
+                        self.main_window.handle_dropped_files(file_paths)
                 return True
         return super().eventFilter(watched, event)
 
