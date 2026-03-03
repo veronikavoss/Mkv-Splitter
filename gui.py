@@ -554,6 +554,9 @@ class MainWindow(QMainWindow):
         
         self.merge_queue_list = QListWidget()
         self.merge_queue_list.setFixedHeight(75)
+        self.merge_queue_list.itemDoubleClicked.connect(self.play_multi_merge_item)
+        self.merge_queue_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.merge_queue_list.model().rowsMoved.connect(self.sync_merge_queue)
         
         self.merge_delete_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Delete), self.merge_queue_list)
         self.merge_delete_shortcut.setContext(Qt.ShortcutContext.WidgetShortcut)
@@ -578,6 +581,7 @@ class MainWindow(QMainWindow):
         self._was_playing_before_slider = False
         self.is_multi_merge_mode = False
         self.multi_merge_files = []
+        self.multi_merge_play_idx = -1
         
         # Enable Drag and Drop (Handled by Global Filter in main.py)
         self.setAcceptDrops(True)
@@ -587,7 +591,7 @@ class MainWindow(QMainWindow):
         self.app_shortcuts = []
         def add_shortcut(key, func):
             shortcut = QShortcut(QKeySequence(key), self)
-            shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+            shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
             shortcut.activated.connect(func)
             self.app_shortcuts.append(shortcut)
             
@@ -669,9 +673,34 @@ class MainWindow(QMainWindow):
         self.export_btn.setText("병합 시작")
         self.statusBar().showMessage(f"{len(files)}개의 파일이 병합 대기열에 추가되었습니다.")
 
-        self.play_button.setEnabled(False)
+        self.play_button.setEnabled(True)
         self.stop_button.setEnabled(True)
-        self.slider.setEnabled(False)
+        self.pre_button.setEnabled(True)
+        self.frame_pre_button.setEnabled(True)
+        self.next_button.setEnabled(True)
+        self.frame_next_button.setEnabled(True)
+        self.jump_start_btn.setEnabled(True)
+        self.jump_end_btn.setEnabled(True)
+        self.slider.setEnabled(True)
+        
+        # 첫 번째 영상부터 재생 시작
+        if files:
+            self._play_queue_index(0)
+
+    def _play_queue_index(self, index):
+        if 0 <= index < len(self.multi_merge_files):
+            self.multi_merge_play_idx = index
+            file_path = self.multi_merge_files[index]
+            self.file_path = file_path
+            self.media_player.setSource(QUrl.fromLocalFile(file_path))
+            self.play_video()
+            self.merge_queue_list.setCurrentRow(index)
+            self.setWindowTitle(f"MKV Lossless Cutter - 다중 파일 미리보기 ({index+1}/{len(self.multi_merge_files)})")
+
+    def play_multi_merge_item(self, item):
+        if not self.is_multi_merge_mode: return
+        row = self.merge_queue_list.row(item)
+        self._play_queue_index(row)
 
     def load_file(self, file_path):
         self.file_path = file_path
@@ -704,6 +733,7 @@ class MainWindow(QMainWindow):
     def stop_and_clear(self):
         self.is_multi_merge_mode = False
         self.multi_merge_files = []
+        self.multi_merge_play_idx = -1
         self.merge_queue_list.clear()
         self.export_btn.setText("내보내기")
         self.slider.setEnabled(True)
@@ -739,7 +769,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("준비 완료")
 
     def toggle_play(self):
-        if not self.file_path:
+        if not self.file_path and not self.is_multi_merge_mode:
             self.open_file()
             return
             
@@ -916,9 +946,19 @@ class MainWindow(QMainWindow):
             self.play_button.setToolTip("재생")
 
     def position_changed(self, position):
-        # Update slider only if not currently being dragged by user
         if not self.is_slider_pressed:
             self.slider.setValue(position)
+            
+        # 다중 병합 미리보기 모드일 때, 영장 재생이 거의 끝나가면 다음 영상으로 전환
+        # QMediaPlayer.mediaStatusChanged 대신 duration에 도달했는지를 명확히 체크
+        if self.is_multi_merge_mode and self.media_player.duration() > 0:
+            if position >= self.media_player.duration() - 100: # 100ms 오차 허용
+                next_idx = self.multi_merge_play_idx + 1
+                if next_idx < len(self.multi_merge_files):
+                    self._play_queue_index(next_idx)
+                else:
+                    self.stop_playback() # 모두 재생 완료
+
         self.update_time_label()
 
     def duration_changed(self, duration):
@@ -1007,6 +1047,23 @@ class MainWindow(QMainWindow):
 
         self.update_segments_list()
         self.check_export_ready()
+
+    def sync_merge_queue(self, parent, start, end, destination, row):
+        new_files = []
+        for i in range(self.merge_queue_list.count()):
+            item = self.merge_queue_list.item(i)
+            file_path = item.data(Qt.ItemDataRole.UserRole)
+            new_files.append(file_path)
+            
+            # Update sequence number text
+            filename = os.path.basename(file_path)
+            item.setText(f"{i+1}. {filename}")
+            
+        self.multi_merge_files = new_files
+        
+        # Adjust currently playing index if needed
+        if self.file_path in self.multi_merge_files:
+            self.multi_merge_play_idx = self.multi_merge_files.index(self.file_path)
 
     def delete_merge_queue_item(self):
         if not self.is_multi_merge_mode: return
