@@ -6,11 +6,89 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox, QFrame)
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
-from PySide6.QtCore import Qt, QUrl, QTime, QPoint, Signal, QObject, QEvent, QSize
+from PySide6.QtCore import Qt, QUrl, QTime, QPoint, Signal, QObject, QEvent, QSize, QTimer
 
 import video_cutter
 
 from PySide6.QtGui import QPainter, QColor, QPolygon, QPen, QBrush, QIcon, QShortcut, QKeySequence
+
+class ElidedLabel(QLabel):
+    def __init__(self, text, parent=None):
+        super().__init__(text, parent)
+        self._text = text
+        self.setToolTip(text)
+
+    def setText(self, text):
+        self._text = text
+        self.setToolTip(text)
+        super().setText(text)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        metrics = painter.fontMetrics()
+        elided = metrics.elidedText(self._text, Qt.TextElideMode.ElideMiddle, self.width())
+        painter.drawText(self.rect(), self.alignment(), elided)
+
+class MergeItemWidget(QWidget):
+    def __init__(self, text, item, main_window):
+        super().__init__()
+        self.item = item
+        self.main_window = main_window
+        
+        layout = QHBoxLayout()
+        layout.setContentsMargins(5, 2, 5, 2)
+        
+        self.label = ElidedLabel(text)
+        self.label.setStyleSheet("background: transparent;")
+        
+        from PySide6.QtWidgets import QSizePolicy
+        self.label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        
+        layout.addWidget(self.label, 1) # Stretch factor 1
+        
+        import os
+        assets_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets").replace("\\", "/")
+        
+        up_style = f"QPushButton {{ background: transparent; border: none; border-image: url({assets_dir}/list_up.svg); }} QPushButton:hover {{ border-image: url({assets_dir}/list_up_hover.svg); }} QPushButton:pressed {{ border-image: url({assets_dir}/list_up.svg); }} QPushButton:disabled {{ border-image: url({assets_dir}/list_up_disabled.svg); }}"
+        down_style = f"QPushButton {{ background: transparent; border: none; border-image: url({assets_dir}/list_down.svg); }} QPushButton:hover {{ border-image: url({assets_dir}/list_down_hover.svg); }} QPushButton:pressed {{ border-image: url({assets_dir}/list_down.svg); }} QPushButton:disabled {{ border-image: url({assets_dir}/list_down_disabled.svg); }}"
+        delete_style = f"QPushButton {{ background: transparent; border: none; border-image: url({assets_dir}/list_delete.svg); }} QPushButton:hover {{ border-image: url({assets_dir}/list_delete_hover.svg); }} QPushButton:pressed {{ border-image: url({assets_dir}/list_delete.svg); }}"
+        
+        self.btn_up = QPushButton("")
+        self.btn_up.setFixedSize(24, 24)
+        self.btn_up.setStyleSheet(up_style)
+        self.btn_up.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_up.clicked.connect(self.move_up)
+        
+        self.btn_down = QPushButton("")
+        self.btn_down.setFixedSize(24, 24)
+        self.btn_down.setStyleSheet(down_style)
+        self.btn_down.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_down.clicked.connect(self.move_down)
+        
+        self.btn_delete = QPushButton("")
+        self.btn_delete.setFixedSize(24, 24)
+        self.btn_delete.setStyleSheet(delete_style)
+        self.btn_delete.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_delete.clicked.connect(self.delete_item)
+        
+        layout.addWidget(self.btn_up)
+        layout.addWidget(self.btn_down)
+        layout.addWidget(self.btn_delete)
+        
+        self.setLayout(layout)
+        
+    def move_up(self):
+        self.main_window.move_queue_item_up(self.item)
+        
+    def move_down(self):
+        self.main_window.move_queue_item_down(self.item)
+        
+    def delete_item(self):
+        self.main_window.delete_queue_item_by_obj(self.item)
+        
+    def mouseDoubleClickEvent(self, event):
+        self.main_window.play_multi_merge_item(self.item)
+        super().mouseDoubleClickEvent(event)
 
 class ClickableVideoWidget(QVideoWidget):
     """
@@ -155,7 +233,8 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("MKV Lossless Editor")
-        self.setWindowIcon(QIcon("assets/app_icon.png"))
+        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "icon.png")
+        self.setWindowIcon(QIcon(icon_path))
         
         # Apply Dark Mode to Windows Title Bar
         try:
@@ -659,14 +738,9 @@ class MainWindow(QMainWindow):
     def load_multi_files(self, files):
         self.stop_and_clear()
         self.is_multi_merge_mode = True
-        self.multi_merge_files = files
+        self.multi_merge_files = list(files)
         
-        self.merge_queue_list.clear() # 우측 새 위젯 사용
-        
-        for i, f in enumerate(files):
-            item = QListWidgetItem(f"{i+1}. {os.path.basename(f)}")
-            item.setData(Qt.ItemDataRole.UserRole, f)
-            self.merge_queue_list.addItem(item)
+        self._refresh_merge_queue_ui()
             
         self.setWindowTitle("MKV Lossless Cutter - 다중 파일 병합 모드")
         self.export_btn.setEnabled(True)
@@ -1048,6 +1122,27 @@ class MainWindow(QMainWindow):
         self.update_segments_list()
         self.check_export_ready()
 
+    def _refresh_merge_queue_ui(self):
+        self.merge_queue_list.clear()
+        for i, f in enumerate(self.multi_merge_files):
+            item = QListWidgetItem()
+            item.setSizeHint(QSize(0, 32))
+            item.setData(Qt.ItemDataRole.UserRole, f)
+            self.merge_queue_list.addItem(item)
+            
+            widget = MergeItemWidget(f"{i+1}. {os.path.basename(f)}", item, self)
+            
+            # Disable Up on the first item, Down on the last item
+            if i == 0:
+                widget.btn_up.setEnabled(False)
+            if i == len(self.multi_merge_files) - 1:
+                widget.btn_down.setEnabled(False)
+                
+            self.merge_queue_list.setItemWidget(item, widget)
+            
+            if self.multi_merge_play_idx == i:
+                self.merge_queue_list.setCurrentItem(item)
+
     def sync_merge_queue(self, parent, start, end, destination, row):
         new_files = []
         for i in range(self.merge_queue_list.count()):
@@ -1055,39 +1150,55 @@ class MainWindow(QMainWindow):
             file_path = item.data(Qt.ItemDataRole.UserRole)
             new_files.append(file_path)
             
-            # Update sequence number text
-            filename = os.path.basename(file_path)
-            item.setText(f"{i+1}. {filename}")
-            
         self.multi_merge_files = new_files
         
-        # Adjust currently playing index if needed
         if self.file_path in self.multi_merge_files:
             self.multi_merge_play_idx = self.multi_merge_files.index(self.file_path)
+        else:
+            self.multi_merge_play_idx = -1
+            
+        QTimer.singleShot(0, self._refresh_merge_queue_ui)
+
+    def move_queue_item_up(self, item):
+        row = self.merge_queue_list.row(item)
+        if row > 0:
+            self.multi_merge_files[row-1], self.multi_merge_files[row] = self.multi_merge_files[row], self.multi_merge_files[row-1]
+            if self.multi_merge_play_idx == row:
+                self.multi_merge_play_idx = row - 1
+            elif self.multi_merge_play_idx == row - 1:
+                self.multi_merge_play_idx = row
+            self._refresh_merge_queue_ui()
+
+    def move_queue_item_down(self, item):
+        row = self.merge_queue_list.row(item)
+        if row >= 0 and row < len(self.multi_merge_files) - 1:
+            self.multi_merge_files[row], self.multi_merge_files[row+1] = self.multi_merge_files[row+1], self.multi_merge_files[row]
+            if self.multi_merge_play_idx == row:
+                self.multi_merge_play_idx = row + 1
+            elif self.multi_merge_play_idx == row + 1:
+                self.multi_merge_play_idx = row
+            self._refresh_merge_queue_ui()
+
+    def delete_queue_item_by_obj(self, item):
+        row = self.merge_queue_list.row(item)
+        if row >= 0:
+            del self.multi_merge_files[row]
+            if self.multi_merge_play_idx == row:
+                self.stop_playback()
+                self.multi_merge_play_idx = -1
+                self.setWindowTitle("MKV Lossless Cutter - 다중 파일 병합 모드")
+            elif self.multi_merge_play_idx > row:
+                self.multi_merge_play_idx -= 1
+            self._refresh_merge_queue_ui()
+            self.check_export_ready()
 
     def delete_merge_queue_item(self):
         if not self.is_multi_merge_mode: return
         selected_items = self.merge_queue_list.selectedItems()
         if not selected_items: return
+        item = selected_items[0]
+        self.delete_queue_item_by_obj(item)
         
-        for item in selected_items:
-            row = self.merge_queue_list.row(item)
-            self.merge_queue_list.takeItem(row)
-            self.multi_merge_files.pop(row)
-            
-        # 순번 텍스트 재정렬
-        for i in range(self.merge_queue_list.count()):
-            item = self.merge_queue_list.item(i)
-            # Remove the old prefix like "1. "
-            text = item.text()
-            parts = text.split(". ", 1)
-            filename = parts[1] if len(parts) > 1 else text
-            item.setText(f"{i+1}. {filename}")
-            
-        self.statusBar().showMessage(f"병합 대기열 항목이 삭제되었습니다. (남은 파일: {len(self.multi_merge_files)}개)")
-        if len(self.multi_merge_files) < 2:
-            self.export_btn.setEnabled(False)
-
     def check_export_ready(self, item=None):
         if not self.file_path:
             self.export_btn.setEnabled(False)
