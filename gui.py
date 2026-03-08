@@ -24,10 +24,15 @@ class ElidedLabel(QLabel):
         super().setText(text)
 
     def paintEvent(self, event):
+        if not self.isVisible() or self.width() <= 0 or self.height() <= 0:
+            return
         painter = QPainter(self)
+        if not painter.isActive():
+            return
         metrics = painter.fontMetrics()
         elided = metrics.elidedText(self._text, Qt.TextElideMode.ElideMiddle, self.width())
         painter.drawText(self.rect(), self.alignment(), elided)
+        painter.end()
 
 class MergeItemWidget(QWidget):
     def __init__(self, text, item, main_window):
@@ -703,12 +708,12 @@ class MainWindow(QMainWindow):
             self.move(window_geometry.topLeft())
 
     def toggle_fullscreen(self):
-        if self.isFullScreen():
+        if self.isMaximized() or self.isFullScreen():
             self.showNormal()
             self.statusBar().showMessage("기본 화면으로 복귀")
         else:
-            self.showFullScreen()
-            self.statusBar().showMessage("전체 화면 모드")
+            self.showMaximized()
+            self.statusBar().showMessage("최대화 모드")
 
     def handle_dropped_files(self, file_paths):
         valid_extensions = ['.mkv', '.mp4', '.avi']
