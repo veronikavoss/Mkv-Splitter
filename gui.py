@@ -424,9 +424,9 @@ class MainWindow(QMainWindow):
         self.play_button.setIconSize(QSize(42, 36))
         self.play_button.setFixedSize(42, 36)
         self.play_button.setStyleSheet("background-color: transparent; border: none;")
-        self.play_button.setToolTip("재생")
+        self.play_button.setToolTip("재생 / 닫힌 상태에선 열기 창 띄우기")
         self.play_button.clicked.connect(self.toggle_play)
-        self.play_button.setEnabled(False) # 비활성화 기본값
+        self.play_button.setEnabled(True) # 빈 상태일 때 눌러서 파일 열 수 있게 활성화 유지
         self.controls_layout.addWidget(self.play_button)
 
         # Stop Button
@@ -815,7 +815,8 @@ class MainWindow(QMainWindow):
         self.media_player.stop()
         self.media_player.setSource(QUrl())
         self.file_path = None
-        self.play_button.setEnabled(False)
+        self.play_button.setEnabled(True) # 빈 상태일 때 누를 수 있게 유지
+        self.play_button.setToolTip("재생 / 파일 새로 열기")
         self.stop_button.setEnabled(False)
         self.pre_button.setEnabled(False)
         self.frame_pre_button.setEnabled(False)
