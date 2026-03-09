@@ -555,6 +555,15 @@ class MainWindow(QMainWindow):
         self.set_end_btn.clicked.connect(self.set_end_mark)
         self.controls_layout.addWidget(self.set_end_btn)
 
+        self.inverse_btn = QPushButton()
+        self.inverse_btn.setIcon(QIcon(os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "select_inverse.svg")))
+        self.inverse_btn.setIconSize(QSize(42, 36))
+        self.inverse_btn.setFixedSize(42, 36)
+        self.inverse_btn.setStyleSheet("background-color: transparent; border: none;")
+        self.inverse_btn.setToolTip("선택 영역 반전")
+        self.inverse_btn.clicked.connect(self.inverse_segments)
+        self.controls_layout.addWidget(self.inverse_btn)
+
         self.clear_btn = QPushButton("선택 초기화")
         self.clear_btn.clicked.connect(self.clear_segments)
         self.controls_layout.addWidget(self.clear_btn)
@@ -1279,6 +1288,46 @@ class MainWindow(QMainWindow):
         self.update_segments_list()
         self.check_export_ready()
         self.statusBar().showMessage("전체 자르기 구간이 초기화되었습니다.")
+
+    def inverse_segments(self):
+        if not self.file_path: return
+        total_duration = self.media_player.duration()
+        if total_duration <= 0: return
+
+        if not self.segments:
+            # 선택 영역이 없으면 전체를 선택
+            self.segments = [(0, total_duration)]
+        else:
+            # 겹치는 구간 병합 후 역순 구간 계산
+            sorted_segs = sorted(self.segments, key=lambda x: x[0])
+            merged = []
+            for s in sorted_segs:
+                if not merged:
+                    merged.append(s)
+                else:
+                    last = merged[-1]
+                    if s[0] <= last[1]:
+                        merged[-1] = (last[0], max(last[1], s[1]))
+                    else:
+                        merged.append(s)
+            
+            new_segments = []
+            curr_time = 0
+            for s, e in merged:
+                if s > curr_time:
+                    new_segments.append((curr_time, s))
+                curr_time = max(curr_time, e)
+            
+            if curr_time < total_duration:
+                new_segments.append((curr_time, total_duration))
+                
+            self.segments = new_segments
+            
+        self.slider.set_segments(self.segments)
+        self.update_segments_list()
+        self.check_export_ready()
+        self.statusBar().showMessage("선택 영역이 반전되었습니다.")
+
 
     def load_tracks_to_table(self, file_path):
         self.tracks_table.setRowCount(0)
