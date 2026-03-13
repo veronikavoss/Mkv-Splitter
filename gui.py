@@ -290,27 +290,33 @@ class MainWindow(QMainWindow):
             QLabel {
                 color: #dddddd;
             }
-            QSlider::groove:horizontal {
+            QSlider#playbackSlider::groove:horizontal {
                 border: 1px solid #3d3d3d;
-                height: 8px;
+                height: 6px;
                 background: #1e1e1e;
                 margin: 2px 0;
-                border-radius: 4px;
+                border-radius: 3px;
             }
-            QSlider::handle:horizontal {
-                background: #0078d7;
-                border: 1px solid #0078d7;
-                width: 16px;
-                height: 16px;
-                margin: -4px 0;
-                border-radius: 8px;
+            QSlider#playbackSlider::sub-page:horizontal {
+                background: #6b6b6b;
+                height: 2px;
+                border-radius: 1px;
+                margin: 4px 0;
             }
-            QSlider::handle:horizontal:hover {
-                background: #1e90ff;
+            QSlider#playbackSlider::handle:horizontal {
+                background: white;
+                border: 1px solid black;
+                width: 12px;
+                height: 12px;
+                margin: -4px 0px;
+                border-radius: 7px;
+            }
+            QSlider#playbackSlider::handle:horizontal:hover {
+                background: skyblue;
             }
             QSlider#volumeSlider::groove:horizontal {
                 height: 4px;
-                background: #555555;
+                background: #1e1e1e;
                 margin: 0px 4px;
                 border-radius: 2px;
             }
@@ -329,7 +335,7 @@ class MainWindow(QMainWindow):
                 border-radius: 6px;
             }
             QSlider#volumeSlider::handle:horizontal:hover {
-                background: gold;
+                background: skyblue;
             }
             QTableWidget {
                 gridline-color: #777777;
@@ -387,6 +393,7 @@ class MainWindow(QMainWindow):
 
         # Timeline Slider
         self.slider = SeekSlider(Qt.Orientation.Horizontal)
+        self.slider.setObjectName("playbackSlider")
         self.slider.setRange(0, 0)
         self.slider.sliderMoved.connect(self.set_position)
         self.slider.sliderPressed.connect(self.slider_pressed)
