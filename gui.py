@@ -41,7 +41,7 @@ class MergeItemWidget(QWidget):
         self.main_window = main_window
         
         layout = QHBoxLayout()
-        layout.setContentsMargins(5, 2, 5, 2)
+        layout.setContentsMargins(5, 3, 5, 3)
         
         self.label = ElidedLabel(text)
         self.label.setStyleSheet("background: transparent;")
@@ -59,19 +59,19 @@ class MergeItemWidget(QWidget):
         delete_style = f"QPushButton {{ background: transparent; border: none; border-image: url({assets_dir}/list_delete.svg); }} QPushButton:hover {{ border-image: url({assets_dir}/list_delete_hover.svg); }} QPushButton:pressed {{ border-image: url({assets_dir}/list_delete.svg); }}"
         
         self.btn_up = QPushButton("")
-        self.btn_up.setFixedSize(24, 24)
+        self.btn_up.setFixedSize(20, 20)
         self.btn_up.setStyleSheet(up_style)
         self.btn_up.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn_up.clicked.connect(self.move_up)
         
         self.btn_down = QPushButton("")
-        self.btn_down.setFixedSize(24, 24)
+        self.btn_down.setFixedSize(20, 20)
         self.btn_down.setStyleSheet(down_style)
         self.btn_down.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn_down.clicked.connect(self.move_down)
         
         self.btn_delete = QPushButton("")
-        self.btn_delete.setFixedSize(24, 24)
+        self.btn_delete.setFixedSize(20, 20)
         self.btn_delete.setStyleSheet(delete_style)
         self.btn_delete.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn_delete.clicked.connect(self.delete_item)
@@ -93,6 +93,43 @@ class MergeItemWidget(QWidget):
         
     def mouseDoubleClickEvent(self, event):
         self.main_window.play_multi_merge_item(self.item)
+        super().mouseDoubleClickEvent(event)
+
+class SegmentItemWidget(QWidget):
+    def __init__(self, text, item, main_window):
+        super().__init__()
+        self.item = item
+        self.main_window = main_window
+        
+        layout = QHBoxLayout()
+        layout.setContentsMargins(5, 3, 5, 3)
+        
+        self.label = ElidedLabel(text)
+        self.label.setStyleSheet("background: transparent;")
+        
+        from PySide6.QtWidgets import QSizePolicy
+        self.label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        
+        layout.addWidget(self.label, 1) # Stretch factor 1
+        
+        import os
+        assets_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets").replace("\\", "/")
+        delete_style = f"QPushButton {{ background: transparent; border: none; border-image: url({assets_dir}/list_delete.svg); }} QPushButton:hover {{ border-image: url({assets_dir}/list_delete_hover.svg); }} QPushButton:pressed {{ border-image: url({assets_dir}/list_delete.svg); }}"
+        
+        self.btn_delete = QPushButton("")
+        self.btn_delete.setFixedSize(20, 20)
+        self.btn_delete.setStyleSheet(delete_style)
+        self.btn_delete.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_delete.clicked.connect(self.delete_item)
+        
+        layout.addWidget(self.btn_delete)
+        self.setLayout(layout)
+        
+    def delete_item(self):
+        self.main_window.delete_segment_by_obj(self.item)
+        
+    def mouseDoubleClickEvent(self, event):
+        self.main_window.seek_to_segment(self.item)
         super().mouseDoubleClickEvent(event)
 
 class ClickableVideoWidget(QVideoWidget):
@@ -362,14 +399,16 @@ class MainWindow(QMainWindow):
                 background-color: #2b2b2b;
             }
             QListWidget::item {
-                padding: 4px;
+                border-bottom: 1px solid #444444;
             }
             QListWidget::item:hover {
                 background-color: #3d3d3d;
             }
             QListWidget::item:selected {
-                background-color: #0078d7;
+                background-color: #4f3b15;
                 color: #ffffff;
+                border-left: 4px solid #ffcc00;
+                border-bottom: 1px solid #3c2d10;
             }
         """)
 
@@ -1084,15 +1123,23 @@ class MainWindow(QMainWindow):
         if self.start_time > 0 or self.end_time > 0:
             start_str = self.format_time(self.start_time) if self.start_time > 0 else "00:00:00"
             end_str = self.format_time(self.end_time) if self.end_time > 0 else "미지정"
-            item = QListWidgetItem(f"> 현재 활성화: {start_str} ~ {end_str}")
+            text = f"> 현재 활성화: {start_str} ~ {end_str}"
+            item = QListWidgetItem()
+            item.setSizeHint(QSize(0, 32))
             item.setData(Qt.ItemDataRole.UserRole, int(self.start_time))
             self.segments_list.addItem(item)
+            widget = SegmentItemWidget(text, item, self)
+            self.segments_list.setItemWidget(item, widget)
             
         # 저장된 전체 구간 리스트 표시
         for i, (s, e) in enumerate(self.segments):
-            item = QListWidgetItem(f"구간 {i+1}: {self.format_time(s)} ~ {self.format_time(e)}")
+            text = f"구간 {i+1}: {self.format_time(s)} ~ {self.format_time(e)}"
+            item = QListWidgetItem()
+            item.setSizeHint(QSize(0, 32))
             item.setData(Qt.ItemDataRole.UserRole, int(s))
             self.segments_list.addItem(item)
+            widget = SegmentItemWidget(text, item, self)
+            self.segments_list.setItemWidget(item, widget)
 
     def seek_to_segment(self, item):
         start_ms = item.data(Qt.ItemDataRole.UserRole)
@@ -1104,7 +1151,8 @@ class MainWindow(QMainWindow):
             
         # Fallback parsing directly from the item's text if UserRole failed to retrieve
         if start_ms is None:
-            text = item.text()
+            widget = self.segments_list.itemWidget(item)
+            text = widget.label.text() if (widget and hasattr(widget, 'label')) else item.text()
             # 예: "구간 1: 00:00:10 ~ 00:00:20" 또는 "> 현재 활성화: 00:00:10 ~ 미지정"
             if ": " in text and " ~ " in text:
                 try:
@@ -1124,9 +1172,13 @@ class MainWindow(QMainWindow):
     def delete_selected_segment(self):
         selected_items = self.segments_list.selectedItems()
         if not selected_items: return
-        item = selected_items[0]
+        self.delete_segment_by_obj(selected_items[0])
+
+    def delete_segment_by_obj(self, item):
         row = self.segments_list.row(item)
-        text = item.text()
+        if row == -1: return
+        widget = self.segments_list.itemWidget(item)
+        text = widget.label.text() if (widget and hasattr(widget, 'label')) else item.text()
         
         if "> 현재 활성화" in text:
             # 현재 활성화된 마커 취소
