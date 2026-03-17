@@ -240,31 +240,47 @@ class SeekSlider(QSlider):
         # 4. Draw SVGs (Recolored to White)
         base_dir = os.path.dirname(os.path.abspath(__file__))
         
-        def draw_svg_icon(path, x_pos):
+        def draw_svg_icon(path, x_pos, align="start"):
             renderer = QSvgRenderer(path)
             if renderer.isValid():
-                icon_size = 14
-                img = QImage(icon_size, icon_size, QImage.Format.Format_ARGB32_Premultiplied)
+                sz = renderer.defaultSize()
+                target_w = sz.width()
+                target_h = sz.height()
+                
+                # Render to an image using original exact size
+                img = QImage(int(target_w), int(target_h), QImage.Format.Format_ARGB32_Premultiplied)
                 img.fill(Qt.GlobalColor.transparent)
                 
                 p2 = QPainter(img)
                 p2.setRenderHint(QPainter.RenderHint.Antialiasing)
-                renderer.render(p2, QRectF(0, 0, icon_size, icon_size))
+                renderer.render(p2, QRectF(0, 0, target_w, target_h))
                 
                 # Composition mode to make it fully white
                 p2.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
                 p2.fillRect(img.rect(), Qt.GlobalColor.white)
                 p2.end()
                 
-                # Draw slightly above center
-                target_rect = QRectF(x_pos - icon_size / 2.0, bar_y - icon_size / 2.0 - 5, icon_size, icon_size)
+                # Align left edge to x_pos if start, align right edge to x_pos if end
+                target_x = x_pos if align == "start" else x_pos - target_w
+                target_y = bar_y - (target_h / 2.0) + (bar_height / 2.0)
+
+                target_rect = QRectF(target_x, target_y, target_w, target_h)
                 painter.drawImage(target_rect, img)
 
+        # Draw markers for saved segments
+        for start, end in self.segments:
+            s_px = get_px(start)
+            e_px = get_px(end)
+            if s_px >= 0 and e_px > s_px:
+                draw_svg_icon(os.path.join(base_dir, "assets", "start_check_point.svg"), s_px, align="start")
+                draw_svg_icon(os.path.join(base_dir, "assets", "end_check_point.svg"), e_px, align="end")
+
+        # Draw markers for current selection
         if start_px >= 0:
-            draw_svg_icon(os.path.join(base_dir, "assets", "start_check_point.svg"), start_px)
+            draw_svg_icon(os.path.join(base_dir, "assets", "start_check_point.svg"), start_px, align="start")
 
         if end_px >= 0:
-            draw_svg_icon(os.path.join(base_dir, "assets", "end_check_point.svg"), end_px)
+            draw_svg_icon(os.path.join(base_dir, "assets", "end_check_point.svg"), end_px, align="end")
 
         painter.end()
 
