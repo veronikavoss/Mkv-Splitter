@@ -1,16 +1,18 @@
 import sys
 import os
 import ctypes
+import cv2
+import queue
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                                QHBoxLayout, QPushButton, QSlider, QLabel, QFileDialog, QMessageBox, QStyle, QStyleOptionSlider, QListWidget, QListWidgetItem, QAbstractItemView,
                                QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox, QFrame)
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
-from PySide6.QtCore import Qt, QUrl, QTime, QPoint, Signal, QObject, QEvent, QSize, QTimer
+from PySide6.QtCore import Qt, QUrl, QTime, QPoint, Signal, QObject, QEvent, QSize, QTimer, QThread
 
 import video_cutter
 
-from PySide6.QtGui import QPainter, QColor, QPolygon, QPen, QBrush, QIcon, QShortcut, QKeySequence
+from PySide6.QtGui import QPainter, QColor, QPolygon, QPen, QBrush, QIcon, QShortcut, QKeySequence, QPixmap, QImage
 
 class ElidedLabel(QLabel):
     def __init__(self, text, parent=None):
@@ -33,6 +35,113 @@ class ElidedLabel(QLabel):
         elided = metrics.elidedText(self._text, Qt.TextElideMode.ElideMiddle, self.width())
         painter.drawText(self.rect(), self.alignment(), elided)
         painter.end()
+
+class ThumbnailGrabberThread(QThread):
+    thumbnail_ready = Signal(int, QPixmap)  # emits (msec, pixmap)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.request_queue = queue.Queue()
+        self.running = True
+        self.current_video_path = ""
+        self.cap = None
+
+    def request_thumbnail(self, video_path, time_msec):
+        # Only keep the latest request to avoid lagging behind mouse movement
+        while not self.request_queue.empty():
+            try:
+                self.request_queue.get_nowait()
+            except queue.Empty:
+                break
+        self.request_queue.put((video_path, time_msec))
+
+    def run(self):
+        while self.running:
+            try:
+                # Wait for a request
+                item = self.request_queue.get(timeout=0.1)
+                if not item: continue
+                video_path, time_msec = item
+                
+                # If video changed, re-open capture
+                if self.current_video_path != video_path:
+                    if self.cap is not None:
+                        self.cap.release()
+                    self.cap = cv2.VideoCapture(video_path)
+                    self.current_video_path = video_path
+
+                if not self.cap or not self.cap.isOpened():
+                    continue
+
+                # OpenCV time in milliseconds
+                self.cap.set(cv2.CAP_PROP_POS_MSEC, time_msec)
+                ret, frame = self.cap.read()
+                
+                if ret:
+                    # Convert BGR to RGB
+                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    h, w, ch = frame_rgb.shape
+                    bytes_per_line = ch * w
+                    qimg = QImage(frame_rgb.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
+                    
+                    # Scale to exact thumbnail size (e.g. 192x108 for 16:9, which is a 20% increase)
+                    pixmap = QPixmap.fromImage(qimg).scaled(288, 162, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                    self.thumbnail_ready.emit(time_msec, pixmap)
+            
+            except queue.Empty:
+                continue
+            except Exception as e:
+                print(f"Thumbnail error: {e}")
+                
+        if self.cap:
+            self.cap.release()
+
+    def stop(self):
+        self.running = False
+        self.request_queue.put(None)  # Unblock the queue if it's waiting
+        self.wait(2000) # Wait up to 2 seconds
+
+class ThumbnailTooltip(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent, Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(2)
+        
+        # Frame for styling
+        self.frame = QFrame(self)
+        self.frame.setStyleSheet("""
+            QFrame {
+                background-color: rgba(30, 30, 30, 220);
+                border: 1px solid #555;
+                border-radius: 6px;
+            }
+        """)
+        frame_layout = QVBoxLayout(self.frame)
+        frame_layout.setContentsMargins(4, 4, 4, 4)
+        frame_layout.setSpacing(2)
+        
+        # Image label
+        self.img_label = QLabel()
+        self.img_label.setFixedSize(288, 162)
+        self.img_label.setStyleSheet("background-color: black;")
+        self.img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # Time label
+        self.time_label = QLabel("00:00:00")
+        self.time_label.setStyleSheet("color: white; font-size: 11px; font-weight: bold;")
+        self.time_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        frame_layout.addWidget(self.img_label)
+        frame_layout.addWidget(self.time_label)
+        layout.addWidget(self.frame)
+        
+    def set_content(self, pixmap, time_str):
+        self.img_label.setPixmap(pixmap)
+        self.time_label.setText(time_str)
 
 class MergeItemWidget(QWidget):
     def __init__(self, text, item, main_window):
@@ -155,12 +264,17 @@ class SeekSlider(QSlider):
     """
     A custom QSlider that allows clicking to seek to a specific position.
     Also visualizes multiple selected cut ranges with distinct markers.
+    Displays a thumbnail tooltip on hover.
     """
+    hover_time_changed = Signal(int, QPoint) # emits (time_msec, global_pos)
+    hover_left = Signal()
+
     def __init__(self, orientation, parent=None):
         super().__init__(orientation, parent)
         self.segments = [] # List of tuples (start, end)
         self.current_start = -1
         self.current_end = -1
+        self.setMouseTracking(True) # Ensure we get mouseMoveEvent without pressing buttons
 
     def set_current_selection(self, start, end):
         self.current_start = start
@@ -170,6 +284,22 @@ class SeekSlider(QSlider):
     def set_segments(self, segments):
         self.segments = segments
         self.update()
+
+    def mouseMoveEvent(self, event):
+        val = self.pixelPosToRangeValue(event.position().x())
+        if self.maximum() > 0:
+            # Map value to an estimated milliseconds based on MainWindow state
+            # This requires external connection to know the total duration, we emit the raw slider 'value'.
+            # It's better to pass the value and let MainWindow handle conversion, or pass fraction.
+            frac = val / self.maximum()
+            pos = event.globalPosition().toPoint()
+            # Convert to just passing the raw value or fraction, letting main window do math
+            self.hover_time_changed.emit(val, pos)
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event):
+        self.hover_left.emit()
+        super().leaveEvent(event)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -472,6 +602,16 @@ class MainWindow(QMainWindow):
         self.slider.sliderReleased.connect(self.slider_released)
         self.layout.addWidget(self.slider)
 
+        # Thumbnail setup
+        self.thumbnail_thread = ThumbnailGrabberThread(self)
+        self.thumbnail_thread.thumbnail_ready.connect(self.on_thumbnail_ready)
+        self.thumbnail_thread.start()
+        
+        self.thumbnail_tooltip = ThumbnailTooltip(self)
+
+        self.slider.hover_time_changed.connect(self.on_slider_hovered)
+        self.slider.hover_left.connect(self.on_slider_leave)
+
         # Time Labels and Controls Layout
         self.controls_layout = QHBoxLayout()
         self.layout.addLayout(self.controls_layout)
@@ -763,6 +903,54 @@ class MainWindow(QMainWindow):
         # Enable Drag and Drop (Handled by Global Filter in main.py)
         self.setAcceptDrops(True)
         self._is_centered = False
+        
+        # Thumbnail Tooltip and Thread 
+        self.thumbnail_thread = ThumbnailGrabberThread(self)
+        self.thumbnail_thread.thumbnail_ready.connect(self.on_thumbnail_ready)
+        self.thumbnail_thread.start()
+        
+        self.thumbnail_tooltip = ThumbnailTooltip(self)
+
+        self.slider.hover_time_changed.connect(self.on_slider_hovered)
+        self.slider.hover_left.connect(self.on_slider_leave)
+
+    def on_slider_hovered(self, val, global_pos):
+        if not hasattr(self, 'file_path') or not self.file_path or self.media_player.duration() <= 0:
+            return
+            
+        duration = self.media_player.duration()
+        val_range = self.slider.maximum() - self.slider.minimum()
+        if val_range <= 0: return
+        
+        fraction = val / val_range
+        time_msec = int(duration * fraction)
+        
+        time_str = QTime(0, 0, 0).addMSecs(max(0, time_msec)).toString("hh:mm:ss")
+        
+        tip_w = self.thumbnail_tooltip.width()
+        tip_h = self.thumbnail_tooltip.height()
+        
+        x = global_pos.x() - tip_w // 2
+        y_offset = 30
+        y = global_pos.y() - tip_h - y_offset
+        
+        self.thumbnail_tooltip.time_label.setText(time_str)
+        self.thumbnail_tooltip.move(x, y)
+        if not self.thumbnail_tooltip.isVisible():
+            self.thumbnail_tooltip.show()
+            
+        if self.file_path:
+            self.thumbnail_thread.request_thumbnail(self.file_path, time_msec)
+
+    def on_thumbnail_ready(self, time_msec, pixmap):
+        if not hasattr(self, 'thumbnail_tooltip') or not self.thumbnail_tooltip.isVisible():
+            return
+        if not pixmap.isNull():
+            self.thumbnail_tooltip.img_label.setPixmap(pixmap)
+
+    def on_slider_leave(self):
+        if hasattr(self, 'thumbnail_tooltip'):
+            self.thumbnail_tooltip.hide()
 
     def setup_shortcuts(self):
         self.app_shortcuts = []
