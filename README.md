@@ -2,7 +2,7 @@
 
 ![UI Screenshot](https://img.shields.io/badge/GUI-PySide6-brightgreen) ![FFmpeg](https://img.shields.io/badge/Backend-FFmpeg-blue) ![Python](https://img.shields.io/badge/Language-Python-yellow)
 
-"MKV Lossless Editor"는 비디오 파일 포맷(주로 MKV, MP4, AVI)에서 화질과 음질의 저하(Re-encoding) 없이 **원초 상태 그대로(Lossless)** 빠르게 특정 구간만 잘라내거나 추출할 수 있도록 돕는 Python 기반의 데스크톱 GUI 애플리케이션입니다.
+"MKV Lossless Editor"는 비디오 파일 포맷(주로 MKV, MP4, AVI)에서 화질과 음질의 저하(Re-encoding) 없이 **원초 상태 그대로(Lossless)** 재생 화면 상태에서 빠르게 특정 구간만 잘라내거나 추출할 수 있도록 돕는 Python 기반의 데스크톱 GUI 애플리케이션입니다.
 
 강력한 FFmpeg 툴의 `-c copy` 스트림 복사 기능을 백엔드로 활용하며, PyQt의 최신 버전인 **PySide6**를 통해 사용자에게 부드럽고 직관적인 조작 환경을 제공합니다.
 

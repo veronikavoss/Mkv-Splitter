@@ -45,19 +45,13 @@ def get_media_tracks(file_path):
         print(f"Error extracting metadata: {e}")
         return []
 
-def cut_video(input_path, start_ms, end_ms, output_path, selected_track_ids=None):
+def build_cut_cmd(input_path, start_ms, end_ms, output_path, selected_track_ids=None):
     """
-    Cuts the video from start_ms to end_ms using ffmpeg stream copy.
-    NO re-encoding is performed.
+    Builds the ffmpeg command for cutting the video.
+    Returns the command list.
     """
     start_str = format_time_ffmpeg(start_ms)
     end_str = format_time_ffmpeg(end_ms)
-    
-    # Construct the command
-    # -ss before -i is faster seeking (input seeking) but less accurate for stream copy.
-    # -ss after -i is slower (output seeking) but more frame-accurate for re-encoding.
-    # For stream copy (-c copy), strict frame accuracy is impossible without re-encoding at cut points.
-    # We will put -ss before -i for speed, as per request "lossless and fast".
     
     cmd = [
         "ffmpeg",
@@ -68,7 +62,6 @@ def cut_video(input_path, start_ms, end_ms, output_path, selected_track_ids=None
         "-c", "copy"
     ]
     
-    # Map only selected streams or all if none provided
     if selected_track_ids is not None:
         for track_id in selected_track_ids:
             cmd.extend(["-map", f"0:{track_id}"])
@@ -76,25 +69,15 @@ def cut_video(input_path, start_ms, end_ms, output_path, selected_track_ids=None
         cmd.extend(["-map", "0"]) # Map all streams
         
     cmd.append(output_path)
-    
-    print(f"Running command: {' '.join(cmd)}")
-    
-    try:
-        # Run ffmpeg command
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True, encoding='utf-8', errors='ignore')
-        return True, result.stdout
-    except subprocess.CalledProcessError as e:
-        return False, e.stderr
-    except FileNotFoundError:
-        return False, "FFmpeg binary not found. Please ensure FFmpeg is installed and in your PATH."
+    return cmd
 
-def merge_videos(input_files, output_path):
+def build_merge_cmd(input_files, output_path):
     """
-    Merges multiple video files into a single file using ffmpeg concat demuxer.
-    Uses -c copy for lossless and fast merging.
+    Builds the ffmpeg command for merging multiple video files.
+    Returns (cmd_list, list_file_path) or (None, error_msg).
     """
     if not input_files:
-        return False, "No input files provided for merging."
+        return None, "No input files provided for merging."
 
     # Create a temporary concat list file
     list_file_path = output_path + ".txt"
@@ -105,7 +88,7 @@ def merge_videos(input_files, output_path):
                 safe_path = file_path.replace("\\", "/").replace("'", "'\\''")
                 f.write(f"file '{safe_path}'\n")
     except Exception as e:
-        return False, f"Failed to create concat list file: {e}"
+        return None, f"Failed to create concat list file: {e}"
 
     cmd = [
         "ffmpeg",
@@ -117,21 +100,4 @@ def merge_videos(input_files, output_path):
         output_path
     ]
 
-    print(f"Running command: {' '.join(cmd)}")
-
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True, encoding='utf-8', errors='ignore')
-        # Clean up the list file after successful run
-        if os.path.exists(list_file_path):
-            os.remove(list_file_path)
-        return True, result.stdout
-    except subprocess.CalledProcessError as e:
-        return False, e.stderr
-    except FileNotFoundError:
-        return False, "FFmpeg binary not found."
-    finally:
-        if os.path.exists(list_file_path):
-            try:
-                os.remove(list_file_path)
-            except:
-                pass
+    return cmd, list_file_path

@@ -3,9 +3,11 @@ import os
 import ctypes
 import cv2
 import queue
+import re
+import subprocess
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                                QHBoxLayout, QPushButton, QSlider, QLabel, QFileDialog, QMessageBox, QStyle, QStyleOptionSlider, QListWidget, QListWidgetItem, QAbstractItemView,
-                               QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox, QFrame)
+                               QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox, QFrame, QProgressDialog)
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtCore import Qt, QUrl, QTime, QPoint, Signal, QObject, QEvent, QSize, QTimer, QThread
@@ -433,6 +435,105 @@ class SeekSlider(QSlider):
         value = QStyle.sliderValueFromPosition(self.minimum(), self.maximum(), int(pr),
                                                sliderMax - sliderMin, opt.upsideDown)
         return value
+
+class ExportWorker(QThread):
+    progress = Signal(int)
+    log = Signal(str)
+    finished = Signal(bool, list, str)
+
+    def __init__(self, tasks, parent=None):
+        super().__init__(parent)
+        self.tasks = tasks
+        self.running = True
+        self.process = None
+
+    def run(self):
+        total_duration_ms = sum(t.get('duration_ms', 0) for t in self.tasks)
+        completed_ms = 0
+        success_count = 0
+        generated_files = []
+        fail_messages = []
+        
+        for task in self.tasks:
+            if not self.running:
+                break
+                
+            cmd = task['cmd']
+            desc = task.get('desc', '작업 중...')
+            self.log.emit(desc)
+            task_duration = task.get('duration_ms', 0)
+            
+            try:
+                self.process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    universal_newlines=True,
+                    encoding='utf-8',
+                    errors='replace',
+                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+                )
+            except Exception as e:
+                fail_messages.append(f"{desc} 실행 실패: {e}")
+                continue
+
+            time_pattern = re.compile(r"time=(\d+):(\d+):(\d+\.\d+)")
+            
+            while True:
+                if not self.running:
+                    try:
+                        self.process.kill()
+                    except:
+                        pass
+                    break
+                    
+                try:
+                    line = self.process.stderr.readline()
+                except Exception as e:
+                    fail_messages.append(f"{desc} 로그 읽기 오류: {e}")
+                    break
+                    
+                if not line and self.process.poll() is not None:
+                    break
+                    
+                match = time_pattern.search(line)
+                if match and total_duration_ms > 0:
+                    h, m, s = match.groups()
+                    current_ms = int(h) * 3600000 + int(m) * 60000 + float(s) * 1000
+                    overall_progress_ms = completed_ms + current_ms
+                    percent = int((overall_progress_ms / total_duration_ms) * 100)
+                    self.progress.emit(min(99, percent))
+            
+            self.process.wait()
+            if 'cleanup_file' in task and os.path.exists(task['cleanup_file']):
+                try: os.remove(task['cleanup_file'])
+                except: pass
+                
+            if self.process.returncode == 0 and self.running:
+                success_count += 1
+                if 'output' in task:
+                    generated_files.append(task['output'])
+            elif self.running:
+                fail_messages.append(f"{desc} 에러 발생")
+            
+            completed_ms += task_duration
+        
+        if not self.running:
+            self.finished.emit(False, generated_files, "사용자에 의해 취소됨")
+        elif fail_messages:
+            self.finished.emit(False, generated_files, "\n".join(fail_messages))
+        else:
+            self.progress.emit(100)
+            self.finished.emit(True, generated_files, "모든 작업 완료")
+
+    def cancel(self):
+        self.running = False
+        if self.process:
+            try:
+                self.process.kill()
+            except:
+                pass
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -1500,8 +1601,14 @@ class MainWindow(QMainWindow):
         self.delete_queue_item_by_obj(item)
         
     def check_export_ready(self, item=None):
+        if self.is_multi_merge_mode:
+            self.export_btn.setEnabled(len(self.multi_merge_files) > 1)
+            self.export_btn.setText("병합 시작")
+            return
+            
         if not self.file_path:
             self.export_btn.setEnabled(False)
+            self.export_btn.setText("내보내기")
             return
 
         ready = False
@@ -1534,6 +1641,7 @@ class MainWindow(QMainWindow):
                 ready = True
 
         self.export_btn.setEnabled(ready)
+        self.export_btn.setText("내보내기")
 
     def set_start_mark(self):
         self.start_time = self.media_player.position()
@@ -1658,7 +1766,6 @@ class MainWindow(QMainWindow):
             self.tracks_table.setItem(row, 8, QTableWidgetItem(is_forced))
 
     def export_video(self):
-        # 다중 파일 병합 모드일 경우 즉시 병합 로직만 수행
         if self.is_multi_merge_mode and len(self.multi_merge_files) > 1:
             first_file = self.multi_merge_files[0]
             dir_name = os.path.dirname(first_file)
@@ -1667,25 +1774,15 @@ class MainWindow(QMainWindow):
             
             output_path, _ = QFileDialog.getSaveFileName(self, "병합 파일 저장", default_output, "MKV Files (*.mkv);;All Files (*)")
             if output_path:
-                self.export_btn.setEnabled(False)
-                self.export_btn.setText("병합 중...")
-                self.statusBar().showMessage("다중 파일 병합 처리 중...")
-                QApplication.processEvents()
-                
-                success, msg = video_cutter.merge_videos(self.multi_merge_files, output_path)
-                
-                self.export_btn.setEnabled(True)
-                self.export_btn.setText("병합 시작")
-                
-                if success:
-                    self.statusBar().showMessage("병합 완료!")
-                    QMessageBox.information(self, "성공", "파일 병합이 성공적으로 완료되었습니다.")
-                else:
-                    self.statusBar().showMessage("병합 실패")
-                    QMessageBox.critical(self, "실패", f"병합 중 오류가 발생했습니다:\n{msg}")
+                cmd, lst_file = video_cutter.build_merge_cmd(self.multi_merge_files, output_path)
+                if not cmd:
+                    QMessageBox.critical(self, "실패", lst_file)
+                    return
+                # Multi-merge specific progress
+                tasks = [{'cmd': cmd, 'desc': "다중 파일 병합 중...", 'duration_ms': 0, 'cleanup_file': lst_file, 'output': output_path}]
+                self.start_export_worker(tasks, [output_path])
             return
             
-        # 1. 단일 파일 기본 자르기 상태 파악
         has_segments = len(self.segments) > 0
         has_track_changes = False
         selected_track_ids = []
@@ -1697,17 +1794,14 @@ class MainWindow(QMainWindow):
                 id_item = self.tracks_table.item(row, 6)
                 if chk_item and id_item:
                     is_checked = (chk_item.checkState() == Qt.CheckState.Checked)
-                    if not is_checked:
-                        has_track_changes = True
+                    if not is_checked: has_track_changes = True
                     if is_checked:
                         any_checked = True
                         selected_track_ids.append(id_item.data(Qt.ItemDataRole.UserRole))
 
-        # 2. 내보낼 대상이 아예 없으면 거부
         if not self.file_path or (not has_segments and not (has_track_changes and any_checked)):
             return
 
-        # Generate default output filename base
         dir_name = os.path.dirname(self.file_path)
         base_name = os.path.splitext(os.path.basename(self.file_path))[0]
         
@@ -1716,73 +1810,104 @@ class MainWindow(QMainWindow):
         else:
             default_output = os.path.join(dir_name, f"{base_name}_cut.mkv")
 
-        output_path, _ = QFileDialog.getSaveFileName(self, "저장할 파일 선택 (기본 이름으로 _1, _2 ... 자동 생성됨)", default_output, "MKV Files (*.mkv);;All Files (*)")
+        output_path, _ = QFileDialog.getSaveFileName(self, "저장할 파일 선택", default_output, "MKV Files (*.mkv);;All Files (*)")
         
         if output_path:
-            self.play_button.setEnabled(False)
-            self.export_btn.setEnabled(False)
-            
             output_dir = os.path.dirname(output_path)
             output_base, output_ext = os.path.splitext(os.path.basename(output_path))
             
-            # 구간이 없으면 원본의 전체 길이를 추출 대상으로 간주
             process_segments = self.segments if has_segments else [(0, self.media_player.duration())]
             total = len(process_segments)
-            success_count = 0
-            fail_messages = []
-            
             do_merge = self.merge_checkbox.isChecked() and total > 1
+            
+            tasks = []
             generated_files = []
             
             for i, (start_idx, end_idx) in enumerate(process_segments):
-                self.export_btn.setText(f"처리 중... ({i+1}/{total})")
-                self.statusBar().showMessage(f"비디오 내보내기 진행 중... ({i+1}/{total})")
-                QApplication.processEvents() # Force UI update
+                duration_ms = max(0, end_idx - start_idx)
                 
-                # Append number if there are multiple segments
                 if do_merge:
                     current_output = os.path.join(output_dir, f"{output_base}_temp_part{i+1}{output_ext}")
                 elif total > 1:
                     current_output = os.path.join(output_dir, f"{output_base}_{i+1}{output_ext}")
                 else:
                     current_output = output_path
-
-                success, message = video_cutter.cut_video(self.file_path, start_idx, end_idx, current_output, selected_track_ids)
-                if success:
-                    success_count += 1
-                    if do_merge: generated_files.append(current_output)
-                else:
-                    fail_messages.append(f"구간 {i+1}: {message}")
-            
-            if do_merge and success_count == total and len(generated_files) > 1:
-                self.statusBar().showMessage("조각 파일들을 하나로 병합하는 중...")
-                self.export_btn.setText("병합 중...")
-                QApplication.processEvents()
+                    
+                generated_files.append(current_output)
+                cmd = video_cutter.build_cut_cmd(self.file_path, start_idx, end_idx, current_output, selected_track_ids)
+                tasks.append({
+                    'cmd': cmd,
+                    'desc': f"구간 내보내기 중... ({i+1}/{total})",
+                    'duration_ms': duration_ms,
+                    'output': current_output
+                })
                 
+            if do_merge:
                 merged_output_path = output_path
-                merge_success, merge_msg = video_cutter.merge_videos(generated_files, merged_output_path)
-                
-                # delete temp files
-                for f in generated_files:
-                    try:
-                        if os.path.exists(f): os.remove(f)
-                    except:
-                        pass
-                        
-                if not merge_success:
-                    fail_messages.append(f"병합 실패: {merge_msg}")
-                    success_count = 0
+                merge_cmd, lst_file = video_cutter.build_merge_cmd(generated_files, merged_output_path)
+                tasks.append({
+                    'cmd': merge_cmd,
+                    'desc': "조각 파일 묶음 병합 중...",
+                    'duration_ms': 100, # Small padding for merge time
+                    'cleanup_file': lst_file,
+                    'output': merged_output_path,
+                    'generated_temp_files': generated_files # We need to delete these after
+                })
+            
+            self.start_export_worker(tasks, generated_files if do_merge else [])
 
-            self.play_button.setEnabled(True)
-            self.export_btn.setEnabled(True)
-            self.export_btn.setText("내보내기")
+    def start_export_worker(self, tasks, temp_files_created):
+        self.play_button.setEnabled(False)
+        self.export_btn.setEnabled(False)
+        self.temp_files_created_by_worker = temp_files_created # to clean up if cancelled/finished
+        
+        # Create Progress Dialog
+        self.progress_dialog = QProgressDialog("작업을 준비 중...", "취소", 0, 100, self)
+        self.progress_dialog.setWindowTitle("내보내기 진행 상황")
+        self.progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        self.progress_dialog.setMinimumDuration(0)
+        self.progress_dialog.setValue(0)
+        
+        self.export_worker = ExportWorker(tasks, self)
+        self.export_worker.progress.connect(self.progress_dialog.setValue)
+        self.export_worker.log.connect(self.progress_dialog.setLabelText)
+        self.export_worker.finished.connect(self.on_export_finished)
+        self.progress_dialog.canceled.connect(self.export_worker.cancel)
+        
+        self.export_worker.start()
 
-            if success_count == total and not fail_messages:
-                self.statusBar().showMessage(f"내보내기 완료 (성공: {total}개)")
-                QMessageBox.information(self, "성공", "작업이 성공적으로 저장되었습니다.")
+    def on_export_finished(self, success, outputs, msg):
+        self.play_button.setEnabled(True)
+        self.progress_dialog.close()
+        
+        # Clean up intermediate files from merge step
+        if hasattr(self, 'temp_files_created_by_worker'):
+            if success:
+                # Need to manually clean chunks if everything succeeded but it was a merge
+                if any('temp_part' in f for f in self.temp_files_created_by_worker):
+                    for f in self.temp_files_created_by_worker:
+                        if os.path.exists(f): 
+                            try: os.remove(f)
+                            except: pass
             else:
-                self.statusBar().showMessage(f"내보내기 완료 (성공: {success_count}/{total}개)")
-                QMessageBox.critical(self, "완료", f"{success_count}/{total}개 성공.\n실패 내역:\n" + "\n".join(fail_messages))
+                # If cancelled, remove all partial files
+                for f in outputs:
+                    if os.path.exists(f): 
+                        try: os.remove(f)
+                        except: pass
+                for f in self.temp_files_created_by_worker:
+                    if os.path.exists(f): 
+                        try: os.remove(f)
+                        except: pass
+        
+        self.check_export_ready() # Sync the button state properly!
+        
+        if success:
+            self.statusBar().showMessage("작업이 완료되었습니다.")
+            QMessageBox.information(self, "완료", msg)
+        else:
+            self.statusBar().showMessage("작업 취소 또는 실패")
+            QMessageBox.critical(self, "실패", msg)
 
     def handle_errors(self):
         self.play_button.setEnabled(False)
