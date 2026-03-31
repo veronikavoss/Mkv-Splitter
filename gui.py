@@ -1988,3 +1988,10 @@ class MainWindow(QMainWindow):
     def handle_errors(self):
         self.play_button.setEnabled(False)
         self.time_label.setText("오류: " + self.media_player.errorString())
+
+    def closeEvent(self, event):
+        if hasattr(self, 'thumbnail_thread'):
+            self.thumbnail_thread.stop()
+        if hasattr(self, 'export_worker') and self.export_worker.isRunning():
+            self.export_worker.cancel()
+        super().closeEvent(event)
