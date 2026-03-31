@@ -842,6 +842,7 @@ class MainWindow(QMainWindow):
         self.set_start_btn.setStyleSheet("background-color: transparent; border: none;")
         self.set_start_btn.setToolTip("시작점 [I]")
         self.set_start_btn.setProperty("hover_color", "gold")
+        self.set_start_btn.setEnabled(False)
         self.set_start_btn.clicked.connect(self.set_start_mark)
         self.controls_layout.addWidget(self.set_start_btn)
         
@@ -853,6 +854,7 @@ class MainWindow(QMainWindow):
         self.set_end_btn.setStyleSheet("background-color: transparent; border: none;")
         self.set_end_btn.setToolTip("끝점 [O]")
         self.set_end_btn.setProperty("hover_color", "gold")
+        self.set_end_btn.setEnabled(False)
         self.set_end_btn.clicked.connect(self.set_end_mark)
         self.controls_layout.addWidget(self.set_end_btn)
 
@@ -887,6 +889,7 @@ class MainWindow(QMainWindow):
         self.inverse_btn.setStyleSheet("background-color: transparent; border: none;")
         self.inverse_btn.setToolTip("선택 영역 반전")
         self.inverse_btn.setProperty("hover_color", "gold")
+        self.inverse_btn.setEnabled(False)
         self.inverse_btn.clicked.connect(self.inverse_segments)
         self.controls_layout.addWidget(self.inverse_btn)
 
@@ -897,6 +900,7 @@ class MainWindow(QMainWindow):
         self.clear_btn.setStyleSheet("background-color: transparent; border: none;")
         self.clear_btn.setToolTip("선택 초기화")
         self.clear_btn.setProperty("hover_color", "gold")
+        self.clear_btn.setEnabled(False)
         self.clear_btn.clicked.connect(self.clear_segments)
         self.controls_layout.addWidget(self.clear_btn)
 
@@ -1186,6 +1190,10 @@ class MainWindow(QMainWindow):
         self.next_frame_button.setEnabled(True)
         self.move_start_point_btn.setEnabled(True)
         self.move_end_point_btn.setEnabled(True)
+        self.set_start_btn.setEnabled(True)
+        self.set_end_btn.setEnabled(True)
+        self.inverse_btn.setEnabled(True)
+        self.clear_btn.setEnabled(True)
         self.slider.setEnabled(True)
         
         # 첫 번째 영상부터 재생 시작
@@ -1218,6 +1226,10 @@ class MainWindow(QMainWindow):
         self.next_frame_button.setEnabled(True)
         self.move_start_point_btn.setEnabled(True)
         self.move_end_point_btn.setEnabled(True)
+        self.set_start_btn.setEnabled(True)
+        self.set_end_btn.setEnabled(True)
+        self.inverse_btn.setEnabled(True)
+        self.clear_btn.setEnabled(True)
         self.play_video()
         self.setWindowTitle(f"MKV Lossless Cutter - {os.path.basename(self.file_path)}")
         
@@ -1255,6 +1267,10 @@ class MainWindow(QMainWindow):
         self.next_frame_button.setEnabled(False)
         self.move_start_point_btn.setEnabled(False)
         self.move_end_point_btn.setEnabled(False)
+        self.set_start_btn.setEnabled(False)
+        self.set_end_btn.setEnabled(False)
+        self.inverse_btn.setEnabled(False)
+        self.clear_btn.setEnabled(False)
         self.play_button.setIcon(self.play_icon)
         self.setWindowTitle("MKV Lossless Cutter")
         
@@ -1314,7 +1330,7 @@ class MainWindow(QMainWindow):
             red_mute_icon = QIcon(pm)
             
             self.volume_button.setIcon(red_mute_icon)
-            self.volume_button.setProperty("hover_color", "white")
+            self.volume_button.setProperty("hover_color", "skyblue")
             if hasattr(self.volume_button, "_icon_normal_backup"):
                 self.volume_button._icon_normal_backup = red_mute_icon
                 
