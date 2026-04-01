@@ -38,15 +38,21 @@ class ElidedLabel(QLabel):
         painter.drawText(self.rect(), self.alignment(), elided)
         painter.end()
 
-class ThumbnailGrabberThread(QThread):
-    thumbnail_ready = Signal(int, QPixmap)  # emits (msec, pixmap)
+import threading
+class ThumbnailGrabberThread(QObject):
+    thumbnail_ready = Signal(int, QImage)  # emits (msec, qimage.copy())
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName("ThumbnailGrabberThread")
         self.request_queue = queue.Queue()
         self.running = True
         self.current_video_path = ""
         self.cap = None
+        self.thread = threading.Thread(target=self.run, daemon=True)
+
+    def start(self):
+        self.thread.start()
 
     def request_thumbnail(self, video_path, time_msec):
         # Only keep the latest request to avoid lagging behind mouse movement
@@ -58,6 +64,13 @@ class ThumbnailGrabberThread(QThread):
         self.request_queue.put((video_path, time_msec))
 
     def run(self):
+        import subprocess
+        import sys
+        
+        creation_flags = 0
+        if sys.platform == "win32":
+            creation_flags = subprocess.CREATE_NO_WINDOW
+            
         while self.running:
             try:
                 # Wait for a request
@@ -65,43 +78,42 @@ class ThumbnailGrabberThread(QThread):
                 if not item: continue
                 video_path, time_msec = item
                 
-                # If video changed, re-open capture
-                if self.current_video_path != video_path:
-                    if self.cap is not None:
-                        self.cap.release()
-                    self.cap = cv2.VideoCapture(video_path)
-                    self.current_video_path = video_path
+                self.current_video_path = video_path
 
-                if not self.cap or not self.cap.isOpened():
-                    continue
-
-                # OpenCV time in milliseconds
-                self.cap.set(cv2.CAP_PROP_POS_MSEC, time_msec)
-                ret, frame = self.cap.read()
+                # Fast keyframe extraction using ffmpeg
+                cmd = [
+                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "quiet",
+                    "-ss", f"{time_msec / 1000.0:.3f}",
+                    "-i", video_path,
+                    "-vframes", "1",
+                    "-q:v", "5",
+                    "-vf", "scale=288:-2",
+                    "-f", "image2pipe",
+                    "-vcodec", "mjpeg",
+                    "-"
+                ]
                 
-                if ret:
-                    # Convert BGR to RGB
-                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    h, w, ch = frame_rgb.shape
-                    bytes_per_line = ch * w
-                    qimg = QImage(frame_rgb.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
+                proc = subprocess.run(cmd, capture_output=True, creationflags=creation_flags)
+                
+                if proc.returncode == 0 and proc.stdout:
+                    qimg = QImage()
+                    qimg.loadFromData(proc.stdout)
                     
-                    # Scale to exact thumbnail size (e.g. 192x108 for 16:9, which is a 20% increase)
-                    pixmap = QPixmap.fromImage(qimg).scaled(288, 162, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-                    self.thumbnail_ready.emit(time_msec, pixmap)
+                    if not qimg.isNull():
+                        self.thumbnail_ready.emit(time_msec, qimg)
             
             except queue.Empty:
                 continue
             except Exception as e:
-                print(f"Thumbnail error: {e}")
-                
-        if self.cap:
-            self.cap.release()
+                pass # Silently drop thumbnailing errors so it doesn't crash user terminal
 
     def stop(self):
         self.running = False
         self.request_queue.put(None)  # Unblock the queue if it's waiting
-        self.wait(2000) # Wait up to 2 seconds
+        # PySide6 C++ thread warning bypassed via daemon python thread
+        if self.cap:
+            try: self.cap.release()
+            except: pass
 
 class ThumbnailTooltip(QWidget):
     def __init__(self, parent=None):
@@ -938,13 +950,17 @@ class MainWindow(QMainWindow):
         self.tracks_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tracks_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tracks_table.setShowGrid(True)
-        self.tracks_table.setColumnWidth(0, 30) # 최소 넓이로 체크박스만
+        self.tracks_table.setColumnWidth(0, 26) # 최소 넓이로 체크박스만 (26px)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
         self.tracks_table.verticalHeader().setDefaultSectionSize(24) # 셀 높이 압축
         self.tracks_table.itemChanged.connect(self.check_export_ready)
         
-        # Limit height to show exactly 3 rows + header 
-        self.tracks_table.setMinimumHeight(100)
-        self.tracks_table.setMaximumHeight(120)
+        self.tracks_table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.tracks_table.setStyleSheet("QTableWidget { outline: none; } QTableWidget::item { border: none; padding: 0px; } QTableWidget::item:focus { outline: none; border: none; }")
+        
+        # Increase height to show more rows comfortably
+        self.tracks_table.setMinimumHeight(140)
+        self.tracks_table.setMaximumHeight(200)
         self.layout.addWidget(self.tracks_table)
 
         # Add Horizontal Line Separator 2
@@ -1091,10 +1107,11 @@ class MainWindow(QMainWindow):
         if self.file_path:
             self.thumbnail_thread.request_thumbnail(self.file_path, time_msec)
 
-    def on_thumbnail_ready(self, time_msec, pixmap):
+    def on_thumbnail_ready(self, time_msec, qimg):
         if not hasattr(self, 'thumbnail_tooltip') or not self.thumbnail_tooltip.isVisible():
             return
-        if not pixmap.isNull():
+        if not qimg.isNull():
+            pixmap = QPixmap.fromImage(qimg).scaled(288, 162, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
             self.thumbnail_tooltip.img_label.setPixmap(pixmap)
 
     def on_slider_leave(self):
@@ -1990,8 +2007,15 @@ class MainWindow(QMainWindow):
         self.time_label.setText("오류: " + self.media_player.errorString())
 
     def closeEvent(self, event):
+        if hasattr(self, 'media_player'):
+            self.media_player.stop()
+            self.media_player.setSource(QUrl())
+            
         if hasattr(self, 'thumbnail_thread'):
             self.thumbnail_thread.stop()
+            
+        QApplication.processEvents() # Let Qt internal threads process the stop
+        
         if hasattr(self, 'export_worker') and self.export_worker.isRunning():
             self.export_worker.cancel()
         super().closeEvent(event)
