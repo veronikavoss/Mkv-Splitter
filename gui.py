@@ -162,6 +162,11 @@ class MergeItemWidget(QWidget):
         super().__init__()
         self.item = item
         self.main_window = main_window
+        self._click_count = 0
+        self._click_timer = QTimer(self)
+        self._click_timer.setSingleShot(True)
+        self._click_timer.setInterval(10)
+        self._click_timer.timeout.connect(self._on_click_timeout)
         
         layout = QHBoxLayout()
         layout.setContentsMargins(5, 3, 5, 3)
@@ -214,15 +219,31 @@ class MergeItemWidget(QWidget):
     def delete_item(self):
         self.main_window.delete_queue_item_by_obj(self.item)
         
-    def mouseDoubleClickEvent(self, event):
-        self.main_window.play_multi_merge_item(self.item)
-        super().mouseDoubleClickEvent(event)
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._click_count += 1
+            if self._click_count == 1:
+                self._click_timer.start()
+            elif self._click_count >= 2:
+                self._click_timer.stop()
+                self._click_count = 0
+                self.main_window.play_multi_merge_item(self.item)
+            event.accept()
+        super().mousePressEvent(event)
+
+    def _on_click_timeout(self):
+        self._click_count = 0
 
 class SegmentItemWidget(QWidget):
     def __init__(self, text, item, main_window):
         super().__init__()
         self.item = item
         self.main_window = main_window
+        self._click_count = 0
+        self._click_timer = QTimer(self)
+        self._click_timer.setSingleShot(True)
+        self._click_timer.setInterval(10)
+        self._click_timer.timeout.connect(self._on_click_timeout)
         
         layout = QHBoxLayout()
         layout.setContentsMargins(5, 3, 5, 3)
@@ -251,9 +272,20 @@ class SegmentItemWidget(QWidget):
     def delete_item(self):
         self.main_window.delete_segment_by_obj(self.item)
         
-    def mouseDoubleClickEvent(self, event):
-        self.main_window.seek_to_segment(self.item)
-        super().mouseDoubleClickEvent(event)
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._click_count += 1
+            if self._click_count == 1:
+                self._click_timer.start()
+            elif self._click_count >= 2:
+                self._click_timer.stop()
+                self._click_count = 0
+                self.main_window.seek_to_segment(self.item)
+            event.accept()
+        super().mousePressEvent(event)
+
+    def _on_click_timeout(self):
+        self._click_count = 0
 
 class ClickableVideoWidget(QVideoWidget):
     """
