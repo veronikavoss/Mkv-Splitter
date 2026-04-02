@@ -258,22 +258,40 @@ class SegmentItemWidget(QWidget):
 class ClickableVideoWidget(QVideoWidget):
     """
     A custom QVideoWidget that emits a clicked signal on mouse press.
+    QVideoWidget의 네이티브 서피스가 mouseDoubleClickEvent를 가로채므로,
+    타이머 기반으로 더블클릭을 직접 감지한다.
     """
     clicked = Signal()
     doubleClicked = Signal()
 
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._click_count = 0
+        self._click_timer = QTimer(self)
+        self._click_timer.setSingleShot(True)
+        self._click_timer.setInterval(10)  # 50ms 이내 두 번 클릭 = 더블클릭
+        self._click_timer.timeout.connect(self._on_click_timeout)
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            self.clicked.emit()
+            self._click_count += 1
+            if self._click_count == 1:
+                self._click_timer.start()
+            elif self._click_count >= 2:
+                self._click_timer.stop()
+                self._click_count = 0
+                self.doubleClicked.emit()
             event.accept()
         super().mousePressEvent(event)
 
+    def _on_click_timeout(self):
+        if self._click_count == 1:
+            self.clicked.emit()
+        self._click_count = 0
+
     def mouseDoubleClickEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            print(f"[DEBUG] DoubleClick at pos=({event.position().x():.0f}, {event.position().y():.0f})")
-            self.doubleClicked.emit()
-            event.accept()
-        super().mouseDoubleClickEvent(event)
+        # 네이티브 서피스에서 가끔 올 수 있으므로 무시
+        event.accept()
 
 class SeekSlider(QSlider):
     """
