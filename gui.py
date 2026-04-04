@@ -1962,12 +1962,28 @@ class MainWindow(QMainWindow):
 
     def export_video(self):
         if self.is_multi_merge_mode and len(self.multi_merge_files) > 1:
+            extensions = {os.path.splitext(f)[1].lower() for f in self.multi_merge_files}
+            if len(extensions) > 1:
+                msg_box = QMessageBox(self)
+                msg_box.setIcon(QMessageBox.Icon.Warning)
+                msg_box.setWindowTitle("경고: 확장자 불일치")
+                msg_box.setText("병합하려는 파일들의 확장자가 서로 다릅니다.\n이 경우 병합된 영상이 재생되지 않거나 파일이 손상될 수 있습니다.\n\n강제로 병합을 진행하시겠습니까?")
+                
+                btn_yes = msg_box.addButton("강제 병합", QMessageBox.ButtonRole.YesRole)
+                btn_cancel = msg_box.addButton("병합 취소", QMessageBox.ButtonRole.RejectRole)
+                msg_box.setDefaultButton(btn_cancel)
+                
+                msg_box.exec()
+                if msg_box.clickedButton() == btn_cancel:
+                    return
+
             first_file = self.multi_merge_files[0]
             dir_name = os.path.dirname(first_file)
-            base_name = os.path.splitext(os.path.basename(first_file))[0]
-            default_output = os.path.join(dir_name, f"{base_name}_merged.mkv")
+            base_name, ext = os.path.splitext(os.path.basename(first_file))
+            ext = ext.lower() if ext else ".mkv"
+            default_output = os.path.join(dir_name, f"{base_name}_merged{ext}")
             
-            output_path, _ = QFileDialog.getSaveFileName(self, "병합 파일 저장", default_output, "MKV Files (*.mkv);;All Files (*)")
+            output_path, _ = QFileDialog.getSaveFileName(self, "병합 파일 저장", default_output, f"Video Files (*{ext});;All Files (*)")
             if output_path:
                 cmd, lst_file = video_cutter.build_merge_cmd(self.multi_merge_files, output_path)
                 if not cmd:
@@ -1998,14 +2014,15 @@ class MainWindow(QMainWindow):
             return
 
         dir_name = os.path.dirname(self.file_path)
-        base_name = os.path.splitext(os.path.basename(self.file_path))[0]
+        base_name, ext = os.path.splitext(os.path.basename(self.file_path))
+        ext = ext.lower() if ext else ".mkv"
         
         if not has_segments:
-            default_output = os.path.join(dir_name, f"{base_name}_extracted.mkv")
+            default_output = os.path.join(dir_name, f"{base_name}_extracted{ext}")
         else:
-            default_output = os.path.join(dir_name, f"{base_name}_cut.mkv")
+            default_output = os.path.join(dir_name, f"{base_name}_cut{ext}")
 
-        output_path, _ = QFileDialog.getSaveFileName(self, "저장할 파일 선택", default_output, "MKV Files (*.mkv);;All Files (*)")
+        output_path, _ = QFileDialog.getSaveFileName(self, "저장할 파일 선택", default_output, f"Video Files (*{ext});;All Files (*)")
         
         if output_path:
             output_dir = os.path.dirname(output_path)
