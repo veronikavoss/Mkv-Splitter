@@ -1280,12 +1280,13 @@ class MainWindow(QMainWindow):
         self.pre_frame_button.setEnabled(True)
         self.fast_forward_button.setEnabled(True)
         self.next_frame_button.setEnabled(True)
-        self.move_start_point_btn.setEnabled(True)
-        self.move_end_point_btn.setEnabled(True)
-        self.set_start_btn.setEnabled(True)
-        self.set_end_btn.setEnabled(True)
-        self.inverse_btn.setEnabled(True)
-        self.clear_btn.setEnabled(True)
+        self.move_start_point_btn.setEnabled(False)
+        self.move_end_point_btn.setEnabled(False)
+        self.set_start_btn.setEnabled(False)
+        self.set_end_btn.setEnabled(False)
+        self.inverse_btn.setEnabled(False)
+        self.clear_btn.setEnabled(False)
+        self.segments_label.setText('선택된 자르기 구간 목록 <span style="color: #ff6666;">(병합 모드 - 구간 설정 불가)</span>')
         self.slider.setEnabled(True)
         
         # 첫 번째 영상부터 재생 시작
@@ -1322,6 +1323,7 @@ class MainWindow(QMainWindow):
         self.set_end_btn.setEnabled(True)
         self.inverse_btn.setEnabled(True)
         self.clear_btn.setEnabled(True)
+        self.segments_label.setText("선택된 자르기 구간 목록")
         self.play_video()
         self.setWindowTitle(f"MKV Lossless Cutter - {os.path.basename(self.file_path)}")
         
@@ -1342,6 +1344,25 @@ class MainWindow(QMainWindow):
     def stop_and_clear(self):
         self.is_multi_merge_mode = False
         self.multi_merge_files = []
+        self._refresh_merge_queue_ui()
+        self.file_path = None
+        self.media_player.stop()
+        self.media_player.setSource(QUrl())
+        
+        self.slider.setEnabled(False)
+        self.play_button.setEnabled(False)
+        self.stop_button.setEnabled(False)
+        self.rewind_button.setEnabled(False)
+        self.pre_frame_button.setEnabled(False)
+        self.fast_forward_button.setEnabled(False)
+        self.next_frame_button.setEnabled(False)
+        self.move_start_point_btn.setEnabled(False)
+        self.move_end_point_btn.setEnabled(False)
+        self.set_start_btn.setEnabled(False)
+        self.set_end_btn.setEnabled(False)
+        self.inverse_btn.setEnabled(False)
+        self.clear_btn.setEnabled(False)
+        self.segments_label.setText("선택된 자르기 구간 목록")
         self.multi_merge_play_idx = -1
         self.merge_queue_list.clear()
         self.export_btn.setText("내보내기")
@@ -1512,6 +1533,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("1프레임 앞으로")
 
     def jump_to_start(self):
+        if getattr(self, 'is_multi_merge_mode', False): return
         if not self.file_path: return
         starts = [s[0] for s in self.segments]
         # 현재 활성화된(저장 대기 중인) 설정 구간이 있다면 포함
@@ -1535,6 +1557,7 @@ class MainWindow(QMainWindow):
             self.set_position(starts[0])
 
     def jump_to_end(self):
+        if getattr(self, 'is_multi_merge_mode', False): return
         if not self.file_path: return
         ends = [s[1] for s in self.segments]
         # 현재 활성화된 끝점이 있다면 포함
@@ -1812,6 +1835,7 @@ class MainWindow(QMainWindow):
         self.export_btn.setText("내보내기")
 
     def set_start_mark(self):
+        if getattr(self, 'is_multi_merge_mode', False): return
         self.start_time = self.media_player.position()
         self.end_time = 0 # Reset end time for a new segment
         self.update_segments_list()
@@ -1820,6 +1844,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"시작 지점 설정됨: {self.format_time(self.start_time)}")
 
     def set_end_mark(self):
+        if getattr(self, 'is_multi_merge_mode', False): return
         current_pos = self.media_player.position()
         if current_pos <= self.start_time:
              QMessageBox.warning(self, "경고", "끝점은 시작점보다 뒤에 있어야 합니다.")
@@ -1841,6 +1866,7 @@ class MainWindow(QMainWindow):
         self.check_export_ready()
         self.statusBar().showMessage(f"구간 임시 저장됨: {self.format_time(self.segments[-1][0])} ~ {self.format_time(self.segments[-1][1])}")
     def clear_segments(self):
+        if getattr(self, 'is_multi_merge_mode', False): return
         self.segments = []
         self.start_time = 0
         self.end_time = 0
@@ -1851,6 +1877,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("전체 자르기 구간이 초기화되었습니다.")
 
     def inverse_segments(self):
+        if getattr(self, 'is_multi_merge_mode', False): return
         if not self.file_path: return
         total_duration = self.media_player.duration()
         if total_duration <= 0: return
