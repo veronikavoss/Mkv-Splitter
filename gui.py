@@ -466,8 +466,9 @@ class SeekSlider(QSlider):
         for start, end in self.segments:
             s_px = get_px(start)
             e_px = get_px(end)
-            if s_px >= 0 and e_px > s_px:
+            if s_px >= 0:
                 draw_svg_icon(os.path.join(base_dir, "assets", "start_check_point.svg"), s_px, align="start")
+            if e_px >= 0:
                 draw_svg_icon(os.path.join(base_dir, "assets", "end_check_point.svg"), e_px, align="end")
 
         # Draw markers for current selection
@@ -1091,6 +1092,7 @@ class MainWindow(QMainWindow):
         self.media_player.positionChanged.connect(self.position_changed)
         self.media_player.durationChanged.connect(self.duration_changed)
         self.media_player.errorOccurred.connect(self.handle_errors)
+        self.media_player.playbackStateChanged.connect(self.media_state_changed)
 
         # Status Bar
         self.statusBar().showMessage("준비 완료")
@@ -1214,6 +1216,8 @@ class MainWindow(QMainWindow):
         add_shortcut(Qt.Key.Key_Period, self.jump_to_end)
         add_shortcut(Qt.Key.Key_Space, self.toggle_play)
         add_shortcut(Qt.Key.Key_Escape, self.stop_playback)
+        add_shortcut(Qt.Key.Key_Return, self.toggle_fullscreen)
+        add_shortcut(Qt.Key.Key_Enter, self.toggle_fullscreen)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -1403,6 +1407,33 @@ class MainWindow(QMainWindow):
         self.check_export_ready()
         self.statusBar().showMessage("준비 완료")
 
+    def set_button_icon(self, btn, icon, tooltip=None):
+        btn._icon_normal_backup = icon
+        if tooltip: btn.setToolTip(tooltip)
+        if btn.underMouse():
+            size = btn.iconSize()
+            if size.isEmpty(): size = QSize(42, 36)
+            pm = icon.pixmap(size)
+            painter = QPainter(pm)
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+            fill_color = btn.property("hover_color") or "skyblue"
+            painter.fillRect(pm.rect(), QColor(fill_color))
+            painter.end()
+            btn.setIcon(QIcon(pm))
+        else:
+            btn.setIcon(icon)
+
+    def media_state_changed(self, state):
+        if state == QMediaPlayer.PlaybackState.PlayingState:
+            self.set_button_icon(self.play_button, self.pause_icon, "일시정지")
+            self.statusBar().showMessage("재생")
+        else:
+            self.set_button_icon(self.play_button, self.play_icon, "재생")
+            if state == QMediaPlayer.PlaybackState.PausedState:
+                self.statusBar().showMessage("일시정지")
+            elif state == QMediaPlayer.PlaybackState.StoppedState:
+                self.statusBar().showMessage("정지됨")
+
     def toggle_play(self):
         if not self.file_path and not self.is_multi_merge_mode:
             self.open_file()
@@ -1410,24 +1441,14 @@ class MainWindow(QMainWindow):
             
         if self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             self.media_player.pause()
-            self.play_button.setIcon(self.play_icon)
-            self.play_button.setToolTip("재생")
         else:
             self.media_player.play()
-            self.play_button.setIcon(self.pause_icon)
-            self.play_button.setToolTip("일시정지")
 
     def play_video(self):
         self.media_player.play()
-        self.play_button.setIcon(self.pause_icon)
-        self.play_button.setToolTip("일시정지")
-        self.statusBar().showMessage("재생")
 
     def pause_video(self):
         self.media_player.pause()
-        self.play_button.setIcon(self.play_icon)
-        self.play_button.setToolTip("재생")
-        self.statusBar().showMessage("일시정지")
 
     def toggle_mute(self):
         is_muted = not self.audio_output.isMuted()
@@ -1473,13 +1494,7 @@ class MainWindow(QMainWindow):
             self.toggle_fullscreen()
             return
 
-        if self.file_path:
-            self.media_player.stop()
-            self.set_position(0)
-            self.slider.setValue(0)
-            self.play_button.setIcon(self.play_icon)
-            self.play_button.setToolTip("재생")
-            self.statusBar().showMessage("정지됨")
+        self.stop_and_clear()
 
     def set_volume(self, value):
         # value is 0-100
