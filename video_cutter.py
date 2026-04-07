@@ -20,12 +20,23 @@ def get_media_tracks(file_path):
     cmd = [
         "ffprobe",
         "-v", "quiet",
+        "-analyzeduration", "5000000",
+        "-probesize", "5000000",
         "-print_format", "json",
         "-show_streams",
         file_path
     ]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True, encoding='utf-8', errors='ignore')
+        import sys
+        creation_flags = 0
+        if sys.platform == "win32":
+            creation_flags = subprocess.CREATE_NO_WINDOW
+            
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, check=True, 
+            encoding='utf-8', errors='ignore', 
+            creationflags=creation_flags, timeout=5
+        )
         data = json.loads(result.stdout)
         streams = data.get('streams', [])
         tracks = []

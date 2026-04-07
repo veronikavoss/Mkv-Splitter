@@ -66,6 +66,7 @@ class ThumbnailGrabberThread(QObject):
     def run(self):
         import subprocess
         import sys
+        import time
         
         creation_flags = 0
         if sys.platform == "win32":
@@ -76,13 +77,23 @@ class ThumbnailGrabberThread(QObject):
                 # Wait for a request
                 item = self.request_queue.get(timeout=0.1)
                 if not item: continue
-                video_path, time_msec = item
                 
+                # Drain queue again to get the absolutely most recent request
+                while not self.request_queue.empty():
+                    try:
+                        item = self.request_queue.get_nowait()
+                    except queue.Empty:
+                        break
+                        
+                if not item: continue
+                video_path, time_msec = item
                 self.current_video_path = video_path
 
                 # Fast keyframe extraction using ffmpeg
                 cmd = [
                     "ffmpeg", "-y", "-hide_banner", "-loglevel", "quiet",
+                    "-threads", "0",             # Allow multi-threading to speed up (use more CPU)
+                    "-skip_frame", "nokey",      # Only decode keyframes for fast seek!
                     "-ss", f"{time_msec / 1000.0:.3f}",
                     "-i", video_path,
                     "-vframes", "1",
@@ -1302,6 +1313,11 @@ class MainWindow(QMainWindow):
             self.multi_merge_play_idx = index
             file_path = self.multi_merge_files[index]
             self.file_path = file_path
+            
+            # Clear previous thumbnail
+            if hasattr(self, 'thumbnail_tooltip') and self.thumbnail_tooltip:
+                self.thumbnail_tooltip.img_label.clear()
+                
             self.media_player.setSource(QUrl.fromLocalFile(file_path))
             self.play_video()
             self.merge_queue_list.setCurrentRow(index)
@@ -1314,6 +1330,11 @@ class MainWindow(QMainWindow):
 
     def load_file(self, file_path):
         self.file_path = file_path
+        
+        # Clear previous thumbnail
+        if hasattr(self, 'thumbnail_tooltip') and self.thumbnail_tooltip:
+            self.thumbnail_tooltip.img_label.clear()
+            
         self.media_player.setSource(QUrl.fromLocalFile(self.file_path))
         self.play_button.setEnabled(True)
         self.stop_button.setEnabled(True)
