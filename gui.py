@@ -7,7 +7,7 @@ import re
 import subprocess
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                                QHBoxLayout, QPushButton, QSlider, QLabel, QFileDialog, QMessageBox, QStyle, QStyleOptionSlider, QListWidget, QListWidgetItem, QAbstractItemView,
-                               QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox, QFrame, QProgressDialog)
+                               QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox, QComboBox, QFrame, QProgressDialog)
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtCore import Qt, QUrl, QTime, QPoint, Signal, QObject, QEvent, QSize, QTimer, QThread
@@ -78,6 +78,9 @@ class ThumbnailGrabberThread(QObject):
                 item = self.request_queue.get(timeout=0.1)
                 if not item: continue
                 
+                # Tiny debounce (15ms) to prevent memory & hardware decoder exhaustion
+                time.sleep(0.015)
+                
                 # Drain queue again to get the absolutely most recent request
                 while not self.request_queue.empty():
                     try:
@@ -92,7 +95,7 @@ class ThumbnailGrabberThread(QObject):
                 # Fast keyframe extraction using ffmpeg
                 cmd = [
                     "ffmpeg", "-y", "-hide_banner", "-loglevel", "quiet",
-                    "-threads", "0",             # Allow multi-threading to speed up (use more CPU)
+                    "-threads", "4",             # Limit to 4 threads to prevent OOM
                     "-skip_frame", "nokey",      # Only decode keyframes for fast seek!
                     "-ss", f"{time_msec / 1000.0:.3f}",
                     "-i", video_path,
@@ -176,7 +179,7 @@ class MergeItemWidget(QWidget):
         self._click_count = 0
         self._click_timer = QTimer(self)
         self._click_timer.setSingleShot(True)
-        self._click_timer.setInterval(10)
+        self._click_timer.setInterval(100)
         self._click_timer.timeout.connect(self._on_click_timeout)
         
         layout = QHBoxLayout()
@@ -253,7 +256,7 @@ class SegmentItemWidget(QWidget):
         self._click_count = 0
         self._click_timer = QTimer(self)
         self._click_timer.setSingleShot(True)
-        self._click_timer.setInterval(10)
+        self._click_timer.setInterval(100)
         self._click_timer.timeout.connect(self._on_click_timeout)
         
         layout = QHBoxLayout()
@@ -312,7 +315,7 @@ class ClickableVideoWidget(QVideoWidget):
         self._click_count = 0
         self._click_timer = QTimer(self)
         self._click_timer.setSingleShot(True)
-        self._click_timer.setInterval(10)  # 50ms 이내 두 번 클릭 = 더블클릭
+        self._click_timer.setInterval(100)  # 50ms 이내 두 번 클릭 = 더블클릭
         self._click_timer.timeout.connect(self._on_click_timeout)
 
     def mousePressEvent(self, event):
@@ -1006,6 +1009,7 @@ class MainWindow(QMainWindow):
             "", "유형", "코덱", "항목 복사", "언어", "이름", "ID", "기본 트랙", "Forced display"
         ])
         
+        # Header configuration
         header = self.tracks_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setStretchLastSection(True)
@@ -1017,6 +1021,24 @@ class MainWindow(QMainWindow):
         self.tracks_table.setColumnWidth(0, 24) # 체크박스 중앙 정렬용 적절한 폭
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
         self.tracks_table.verticalHeader().setDefaultSectionSize(24) # 셀 높이 압축
+        
+        self._updating_all_tracks = False
+        
+        self.header_checkbox = QCheckBox(header.viewport())
+        self.header_checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.header_checkbox.stateChanged.connect(self.toggle_all_tracks)
+        
+        header.setSectionsClickable(True)
+        header.sectionClicked.connect(self.on_header_clicked)
+        
+        # Keep checkbox positioned correctly when resizing or scrolling
+        header.sectionResized.connect(self.update_header_widgets_geometry)
+        self.tracks_table.horizontalScrollBar().valueChanged.connect(self.update_header_widgets_geometry)
+        
+        # Schedule initial positioning
+        QTimer.singleShot(50, self.update_header_widgets_geometry)
+        
+        self.tracks_table.itemChanged.connect(self.update_header_checkbox_state)
         self.tracks_table.itemChanged.connect(self.check_export_ready)
         
         self.tracks_table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -1041,6 +1063,25 @@ class MainWindow(QMainWindow):
                 image: url("{check_path.replace(chr(92), '/')}");
             }}
             QTableWidget::indicator:hover {{
+                border: 1px solid #aaa;
+            }}
+        """)
+        
+        self.header_checkbox.setStyleSheet(f"""
+            QCheckBox {{
+                background: transparent;
+            }}
+            QCheckBox::indicator {{
+                width: 13px; height: 13px;
+                background-color: transparent;
+                border: 1px solid white;
+                border-radius: 2px;
+                margin-left: 10px;
+            }}
+            QCheckBox::indicator:checked {{
+                image: url("{check_path.replace(chr(92), '/')}");
+            }}
+            QCheckBox::indicator:hover {{
                 border: 1px solid #aaa;
             }}
         """)
@@ -1827,6 +1868,91 @@ class MainWindow(QMainWindow):
         item = selected_items[0]
         self.delete_queue_item_by_obj(item)
         
+    def filter_by_type(self, text):
+        self._updating_all_tracks = True
+        
+        target = text
+        if text == "유형(전체)":
+            target = "전체"
+            
+        for row in range(self.tracks_table.rowCount()):
+            item = self.tracks_table.item(row, 0)
+            type_item = self.tracks_table.item(row, 1)
+            if item and type_item:
+                if target == "전체":
+                    item.setCheckState(Qt.CheckState.Checked)
+                else:
+                    if type_item.text() == target:
+                        item.setCheckState(Qt.CheckState.Checked)
+                    else:
+                        item.setCheckState(Qt.CheckState.Unchecked)
+                        
+        self._updating_all_tracks = False
+        self.update_header_checkbox_state()
+        self.check_export_ready()
+
+    def on_header_clicked(self, logicalIndex):
+        if logicalIndex == 0:
+            self.header_checkbox.toggle()
+        elif logicalIndex == 1:
+            from PySide6.QtWidgets import QMenu
+            from PySide6.QtGui import QCursor
+            menu = QMenu(self)
+            menu.setStyleSheet("QMenu { background-color: #2b2b2b; color: white; border: 1px solid #444; } QMenu::item:selected { background-color: #555; }")
+            
+            act_all = menu.addAction("유형 전체 선택")
+            menu.addSeparator()
+            act_vid = menu.addAction("비디오만 선택")
+            act_aud = menu.addAction("오디오만 선택")
+            act_sub = menu.addAction("자막만 선택")
+            
+            action = menu.exec(QCursor.pos())
+            if action == act_all:
+                self.filter_by_type("전체")
+            elif action == act_vid:
+                self.filter_by_type("비디오")
+            elif action == act_aud:
+                self.filter_by_type("오디오")
+            elif action == act_sub:
+                self.filter_by_type("자막")
+
+    def update_header_widgets_geometry(self, *args):
+        header = self.tracks_table.horizontalHeader()
+        h = header.height()
+        
+        if hasattr(self, 'header_checkbox'):
+            x0 = header.sectionViewportPosition(0)
+            w0 = header.sectionSize(0)
+            self.header_checkbox.setGeometry(x0, 0, w0, h)
+            self.header_checkbox.show()
+            self.header_checkbox.raise_()
+
+    def update_header_checkbox_state(self, item=None):
+        if getattr(self, '_updating_all_tracks', False) or not hasattr(self, 'header_checkbox') or not self.tracks_table.rowCount(): return
+        if item is not None and item.column() != 0: return
+        
+        all_checked = True
+        for row in range(self.tracks_table.rowCount()):
+            chk = self.tracks_table.item(row, 0)
+            if chk and chk.checkState() != Qt.CheckState.Checked:
+                all_checked = False
+                break
+        
+        self.header_checkbox.blockSignals(True)
+        self.header_checkbox.setChecked(all_checked)
+        self.header_checkbox.blockSignals(False)
+
+    def toggle_all_tracks(self, state):
+        self._updating_all_tracks = True
+        # state could be int (0/2) from QCheckBox, map to Qt.CheckState
+        chk_state = Qt.CheckState.Checked if state == 2 else Qt.CheckState.Unchecked
+        for row in range(self.tracks_table.rowCount()):
+            item = self.tracks_table.item(row, 0)
+            if item:
+                item.setCheckState(chk_state)
+        self._updating_all_tracks = False
+        self.check_export_ready()
+
     def check_export_ready(self, item=None):
         if self.is_multi_merge_mode:
             self.export_btn.setEnabled(len(self.multi_merge_files) > 1)
@@ -2019,7 +2145,8 @@ class MainWindow(QMainWindow):
             ext = ext.lower() if ext else ".mkv"
             default_output = os.path.join(dir_name, f"{base_name}_merged{ext}")
             
-            output_path, _ = QFileDialog.getSaveFileName(self, "병합 파일 저장", default_output, f"Video Files (*{ext});;All Files (*)")
+            desc = "Audio Files" if ext in ['.m4a', '.mp3', '.mka', '.aac', '.flac', '.wav', '.ogg'] else "Subtitle Files" if ext in ['.srt', '.mks', '.ass', '.vtt'] else "Video Files"
+            output_path, _ = QFileDialog.getSaveFileName(self, "병합 파일 저장", default_output, f"{desc} (*{ext});;All Files (*)")
             if output_path:
                 cmd, lst_file = video_cutter.build_merge_cmd(self.multi_merge_files, output_path)
                 if not cmd:
@@ -2033,32 +2160,61 @@ class MainWindow(QMainWindow):
         has_segments = len(self.segments) > 0
         has_track_changes = False
         selected_track_ids = []
+        selected_track_types = []
+        selected_track_codecs = []
         any_checked = False
         
         if self.file_path:
             for row in range(self.tracks_table.rowCount()):
                 chk_item = self.tracks_table.item(row, 0)
                 id_item = self.tracks_table.item(row, 6)
+                type_item = self.tracks_table.item(row, 1)
+                codec_item = self.tracks_table.item(row, 2)
+                
                 if chk_item and id_item:
                     is_checked = (chk_item.checkState() == Qt.CheckState.Checked)
                     if not is_checked: has_track_changes = True
                     if is_checked:
                         any_checked = True
                         selected_track_ids.append(id_item.data(Qt.ItemDataRole.UserRole))
+                        if type_item: selected_track_types.append(type_item.text())
+                        if codec_item: selected_track_codecs.append(codec_item.text().lower())
 
         if not self.file_path or (not has_segments and not (has_track_changes and any_checked)):
             return
 
         dir_name = os.path.dirname(self.file_path)
-        base_name, ext = os.path.splitext(os.path.basename(self.file_path))
-        ext = ext.lower() if ext else ".mkv"
+        base_name, original_ext = os.path.splitext(os.path.basename(self.file_path))
+        original_ext = original_ext.lower() if original_ext else ".mkv"
+        
+        ext = original_ext
+        if "비디오" not in selected_track_types and len(selected_track_types) > 0:
+            if all(t == "자막" for t in selected_track_types):
+                if len(selected_track_types) == 1 and ("srt" in selected_track_codecs[0] or "subrip" in selected_track_codecs[0]):
+                    ext = ".srt"
+                else:
+                    ext = ".mks"
+            elif all(t == "오디오" for t in selected_track_types):
+                if len(selected_track_types) == 1:
+                    codec = selected_track_codecs[0]
+                    if codec == "aac":
+                        ext = ".m4a"
+                    elif codec == "mp3":
+                        ext = ".mp3"
+                    else:
+                        ext = ".mka"
+                else:
+                    ext = ".mka"
+            else:
+                ext = ".mka"
         
         if not has_segments:
             default_output = os.path.join(dir_name, f"{base_name}_extracted{ext}")
         else:
             default_output = os.path.join(dir_name, f"{base_name}_cut{ext}")
 
-        output_path, _ = QFileDialog.getSaveFileName(self, "저장할 파일 선택", default_output, f"Video Files (*{ext});;All Files (*)")
+        desc = "Audio Files" if ext in ['.m4a', '.mp3', '.mka', '.aac', '.flac', '.wav', '.ogg'] else "Subtitle Files" if ext in ['.srt', '.mks', '.ass', '.vtt'] else "Video Files"
+        output_path, _ = QFileDialog.getSaveFileName(self, "저장할 파일 선택", default_output, f"{desc} (*{ext});;All Files (*)")
         
         if output_path:
             output_dir = os.path.dirname(output_path)
