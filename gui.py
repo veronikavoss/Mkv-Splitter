@@ -174,7 +174,7 @@ class MergeItemWidget(QWidget):
         super().__init__()
         self.item = item
         self.main_window = main_window
-        self.main_window = main_window
+        self._last_click_time = 0
         
         layout = QHBoxLayout()
         layout.setContentsMargins(5, 3, 5, 3)
@@ -228,7 +228,17 @@ class MergeItemWidget(QWidget):
         self.main_window.delete_queue_item_by_obj(self.item)
         
     def mousePressEvent(self, event):
-        event.ignore()
+        if event.button() == Qt.MouseButton.LeftButton:
+            current_time = time.time() * 1000
+            interval = QApplication.doubleClickInterval()
+            if current_time - self._last_click_time < interval:
+                self._last_click_time = 0
+                self.main_window.play_multi_merge_item(self.item)
+            else:
+                self._last_click_time = current_time
+                event.ignore()
+            return
+        super().mousePressEvent(event)
 
     def mouseDoubleClickEvent(self, event):
         event.ignore()
@@ -238,7 +248,7 @@ class SegmentItemWidget(QWidget):
         super().__init__()
         self.item = item
         self.main_window = main_window
-        self.main_window = main_window
+        self._last_click_time = 0
         
         layout = QHBoxLayout()
         layout.setContentsMargins(5, 3, 5, 3)
@@ -268,7 +278,17 @@ class SegmentItemWidget(QWidget):
         self.main_window.delete_segment_by_obj(self.item)
         
     def mousePressEvent(self, event):
-        event.ignore()
+        if event.button() == Qt.MouseButton.LeftButton:
+            current_time = time.time() * 1000
+            interval = QApplication.doubleClickInterval()
+            if current_time - self._last_click_time < interval:
+                self._last_click_time = 0
+                self.main_window.seek_to_segment(self.item)
+            else:
+                self._last_click_time = current_time
+                event.ignore()
+            return
+        super().mousePressEvent(event)
 
     def mouseDoubleClickEvent(self, event):
         event.ignore()
