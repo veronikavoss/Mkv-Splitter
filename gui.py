@@ -1005,10 +1005,35 @@ class MainWindow(QMainWindow):
         self.separator.setStyleSheet("background-color: #3d3d3d;")
         self.bottom_panel_layout.addWidget(self.separator)
 
-        # Tracks Table Widget
+        # Tracks Table Widget Header
+        self.tracks_header_layout = QHBoxLayout()
+        self.tracks_header_layout.setContentsMargins(0, 0, 0, 0)
+        
         self.tracks_label = QLabel("트랙, 챕터와 태그")
         self.tracks_label.setStyleSheet("color: gold; font-weight: bold; margin-top: 4px; margin-bottom: 4px;")
-        self.bottom_panel_layout.addWidget(self.tracks_label)
+        self.tracks_header_layout.addWidget(self.tracks_label)
+        
+        self.tracks_header_layout.addStretch()
+        
+        assets_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets").replace("\\", "/")
+        
+        self.btn_maximize = QPushButton()
+        self.btn_maximize.setFixedSize(20, 20)
+        self.btn_maximize.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_maximize.setStyleSheet(f"QPushButton {{ background: transparent; border: none; border-image: url({assets_dir}/max_screen.svg); }} QPushButton:hover {{ border-image: url({assets_dir}/max_screen_hover.svg); }}")
+        self.btn_maximize.setToolTip("창 최대화 / 복원 (비디오 더블클릭)")
+        self.btn_maximize.clicked.connect(self.toggle_maximized)
+        self.tracks_header_layout.addWidget(self.btn_maximize)
+        
+        self.btn_fullscreen = QPushButton()
+        self.btn_fullscreen.setFixedSize(20, 20)
+        self.btn_fullscreen.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_fullscreen.setStyleSheet(f"QPushButton {{ background: transparent; border: none; border-image: url({assets_dir}/full_screen.svg); }} QPushButton:hover {{ border-image: url({assets_dir}/full_screen_hover.svg); }}")
+        self.btn_fullscreen.setToolTip("순수 전체화면 모드 (Alt+Enter)")
+        self.btn_fullscreen.clicked.connect(self.toggle_true_fullscreen)
+        self.tracks_header_layout.addWidget(self.btn_fullscreen)
+        
+        self.bottom_panel_layout.addLayout(self.tracks_header_layout)
         
         self.tracks_table = QTableWidget(0, 9)
         self.tracks_table.setHorizontalHeaderLabels([
@@ -1311,6 +1336,15 @@ class MainWindow(QMainWindow):
                     if not self.bottom_panel.isHidden():
                         self.bottom_panel.hide()
         return super().eventFilter(obj, event)
+    def changeEvent(self, event):
+        if event.type() == QEvent.Type.WindowStateChange:
+            assets_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets").replace("\\", "/")
+            if hasattr(self, 'btn_maximize'):
+                if self.isMaximized():
+                    self.btn_maximize.setStyleSheet(f"QPushButton {{ background: transparent; border: none; border-image: url({assets_dir}/min_screen.svg); }} QPushButton:hover {{ border-image: url({assets_dir}/min_screen_hover.svg); }}")
+                else:
+                    self.btn_maximize.setStyleSheet(f"QPushButton {{ background: transparent; border: none; border-image: url({assets_dir}/max_screen.svg); }} QPushButton:hover {{ border-image: url({assets_dir}/max_screen_hover.svg); }}")
+        super().changeEvent(event)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -1327,14 +1361,20 @@ class MainWindow(QMainWindow):
             self.move(window_geometry.topLeft())
 
     def toggle_maximized(self):
+        assets_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets").replace("\\", "/")
         if self.isMaximized():
             self.showNormal()
             self.statusBar().showMessage("기본 화면으로 복귀")
+            if hasattr(self, 'btn_maximize'):
+                self.btn_maximize.setStyleSheet(f"QPushButton {{ background: transparent; border: none; border-image: url({assets_dir}/max_screen.svg); }} QPushButton:hover {{ border-image: url({assets_dir}/max_screen_hover.svg); }}")
         else:
             self.showMaximized()
             self.statusBar().showMessage("최대화 모드 (더블클릭)")
+            if hasattr(self, 'btn_maximize'):
+                self.btn_maximize.setStyleSheet(f"QPushButton {{ background: transparent; border: none; border-image: url({assets_dir}/min_screen.svg); }} QPushButton:hover {{ border-image: url({assets_dir}/min_screen_hover.svg); }}")
 
     def toggle_true_fullscreen(self):
+        assets_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets").replace("\\", "/")
         if self.isFullScreen():
             self._is_true_fullscreen = False
             self.bottom_panel.show()
@@ -1342,12 +1382,16 @@ class MainWindow(QMainWindow):
             self.statusBar().show()
             if hasattr(self, 'menubar') and self.menubar: self.menubar.show()
             self.statusBar().showMessage("기본 화면으로 복귀")
+            if hasattr(self, 'btn_fullscreen'):
+                self.btn_fullscreen.setStyleSheet(f"QPushButton {{ background: transparent; border: none; border-image: url({assets_dir}/full_screen.svg); }} QPushButton:hover {{ border-image: url({assets_dir}/full_screen_hover.svg); }}")
         else:
             self._is_true_fullscreen = True
             self.bottom_panel.hide()
             self.showFullScreen()
             self.statusBar().hide()
             if hasattr(self, 'menubar') and self.menubar: self.menubar.hide()
+            if hasattr(self, 'btn_fullscreen'):
+                self.btn_fullscreen.setStyleSheet(f"QPushButton {{ background: transparent; border: none; border-image: url({assets_dir}/defalt_screen.svg); }} QPushButton:hover {{ border-image: url({assets_dir}/defalt_screen_hover.svg); }}")
 
     def handle_dropped_files(self, file_paths):
         valid_extensions = ['.mkv', '.mp4', '.avi']
