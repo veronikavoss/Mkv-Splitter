@@ -768,7 +768,7 @@ class MainWindow(QMainWindow):
         self.video_widget = ClickableVideoWidget(self.central_widget)
         self.video_widget.setMinimumSize(1344, 756)
         self.video_widget.clicked.connect(self.toggle_play)
-        self.video_widget.doubleClicked.connect(self.toggle_maximized)
+        self.video_widget.doubleClicked.connect(self.handle_video_double_click)
         self.layout.addWidget(self.video_widget, stretch=1)
         self.media_player.setVideoOutput(self.video_widget)
 
@@ -1322,18 +1322,25 @@ class MainWindow(QMainWindow):
     def eventFilter(self, obj, event):
         if self._is_true_fullscreen and event.type() == QEvent.Type.MouseMove:
             if hasattr(event, "globalPosition"):
-                y = event.globalPosition().y()
+                global_pos = event.globalPosition().toPoint()
             else:
-                y = event.globalPos().y() if hasattr(event, "globalPos") else QCursor.pos().y()
+                global_pos = event.globalPos() if hasattr(event, "globalPos") else QCursor.pos()
                 
+            y = global_pos.y()
             screen = QApplication.primaryScreen()
             if screen:
                 screen_h = screen.geometry().height()
-                if y > screen_h * 0.80:
-                    if self.bottom_panel.isHidden():
+                if self.bottom_panel.isHidden():
+                    # 패널이 숨어있을 때는 바탕화면 하단 10% 이하로 내려가면 나타나게 트리거
+                    if y > screen_h * 0.90:
                         self.bottom_panel.show()
                 else:
-                    if not self.bottom_panel.isHidden():
+                    # 패널이 나타나있을 때는 마우스가 패널의 물리적 사각형 영역(rect) 안에 있는지 확인
+                    top_left = self.bottom_panel.mapToGlobal(QPoint(0, 0))
+                    from PySide6.QtCore import QRect
+                    panel_rect = QRect(top_left, self.bottom_panel.size())
+                    
+                    if not panel_rect.contains(global_pos):
                         self.bottom_panel.hide()
         return super().eventFilter(obj, event)
     def changeEvent(self, event):
@@ -1360,8 +1367,36 @@ class MainWindow(QMainWindow):
             window_geometry.moveCenter(screen_geometry.center())
             self.move(window_geometry.topLeft())
 
+    def handle_video_double_click(self):
+        assets_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets").replace("\\", "/")
+        if self._is_true_fullscreen:
+            self._is_true_fullscreen = False
+            self.layout.setContentsMargins(9, 9, 9, 9)
+            self.bottom_panel.show()
+            self.showNormal()
+            self.statusBar().show()
+            if hasattr(self, 'menubar') and self.menubar: self.menubar.show()
+            self.statusBar().showMessage("기본 화면으로 복귀")
+            if hasattr(self, 'btn_fullscreen'):
+                self.btn_fullscreen.setStyleSheet(f"QPushButton {{ background: transparent; border: none; border-image: url({assets_dir}/full_screen.svg); }} QPushButton:hover {{ border-image: url({assets_dir}/full_screen_hover.svg); }}")
+        else:
+            self.toggle_maximized()
+
     def toggle_maximized(self):
         assets_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets").replace("\\", "/")
+        
+        if self._is_true_fullscreen:
+            self._is_true_fullscreen = False
+            self.layout.setContentsMargins(9, 9, 9, 9)
+            self.bottom_panel.show()
+            self.showMaximized()
+            self.statusBar().show()
+            if hasattr(self, 'menubar') and self.menubar: self.menubar.show()
+            self.statusBar().showMessage("최대화 모드")
+            if hasattr(self, 'btn_fullscreen'):
+                self.btn_fullscreen.setStyleSheet(f"QPushButton {{ background: transparent; border: none; border-image: url({assets_dir}/full_screen.svg); }} QPushButton:hover {{ border-image: url({assets_dir}/full_screen_hover.svg); }}")
+            return
+
         if self.isMaximized():
             self.showNormal()
             self.statusBar().showMessage("기본 화면으로 복귀")
@@ -1369,7 +1404,7 @@ class MainWindow(QMainWindow):
                 self.btn_maximize.setStyleSheet(f"QPushButton {{ background: transparent; border: none; border-image: url({assets_dir}/max_screen.svg); }} QPushButton:hover {{ border-image: url({assets_dir}/max_screen_hover.svg); }}")
         else:
             self.showMaximized()
-            self.statusBar().showMessage("최대화 모드 (더블클릭)")
+            self.statusBar().showMessage("최대화 모드")
             if hasattr(self, 'btn_maximize'):
                 self.btn_maximize.setStyleSheet(f"QPushButton {{ background: transparent; border: none; border-image: url({assets_dir}/min_screen.svg); }} QPushButton:hover {{ border-image: url({assets_dir}/min_screen_hover.svg); }}")
 
@@ -1377,6 +1412,7 @@ class MainWindow(QMainWindow):
         assets_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets").replace("\\", "/")
         if self.isFullScreen():
             self._is_true_fullscreen = False
+            self.layout.setContentsMargins(9, 9, 9, 9)
             self.bottom_panel.show()
             self.showNormal()
             self.statusBar().show()
@@ -1386,6 +1422,7 @@ class MainWindow(QMainWindow):
                 self.btn_fullscreen.setStyleSheet(f"QPushButton {{ background: transparent; border: none; border-image: url({assets_dir}/full_screen.svg); }} QPushButton:hover {{ border-image: url({assets_dir}/full_screen_hover.svg); }}")
         else:
             self._is_true_fullscreen = True
+            self.layout.setContentsMargins(0, 0, 0, 0)
             self.bottom_panel.hide()
             self.showFullScreen()
             self.statusBar().hide()
