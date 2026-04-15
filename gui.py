@@ -73,16 +73,16 @@ class ThumbnailGrabberThread(QObject):
         if sys.platform == "win32":
             creation_flags = subprocess.CREATE_NO_WINDOW
             
+        current_proc = None
+        
         while self.running:
             try:
                 # Wait for a request
                 item = self.request_queue.get(timeout=0.1)
                 if not item: continue
                 
-                # Increased debounce (150ms) to vastly reduce CPU usage and FFmpeg spam
-                time.sleep(0.150)
-                
-                # Drain queue again to get the absolutely most recent request
+                # Drain queue completely to get the absolutely most recent request
+                # This naturally limits the extraction rate to FFmpeg's speed without lagging behind
                 while not self.request_queue.empty():
                     try:
                         item = self.request_queue.get_nowait()
@@ -96,7 +96,6 @@ class ThumbnailGrabberThread(QObject):
                 # Fast keyframe extraction using ffmpeg
                 cmd = [
                     "ffmpeg", "-y", "-hide_banner", "-loglevel", "quiet",
-                    "-threads", "2",             # Limit to 2 threads to prevent CPU spikes
                     "-skip_frame", "nokey",      # Only decode keyframes for fast seek!
                     "-ss", f"{time_msec / 1000.0:.3f}",
                     "-i", video_path,
@@ -316,18 +315,15 @@ class ClickableVideoWidget(QVideoWidget):
             current_time = time.time() * 1000
             interval = QApplication.doubleClickInterval()
             if current_time - self._last_click_time < interval:
-                print(f"[DEBUG] VideoWidget - Manual Double Click Detected! Diff: {current_time - self._last_click_time}ms")
                 self._last_click_time = 0
                 self.doubleClicked.emit()
             else:
-                print(f"[DEBUG] VideoWidget - Single Press Detected.")
                 self._last_click_time = current_time
 
     def mouseReleaseEvent(self, event):
         super().mouseReleaseEvent(event)
         if event.button() == Qt.MouseButton.LeftButton:
             if self._last_click_time != 0:
-                print(f"[DEBUG] VideoWidget - mouseReleaseEvent - Timer Start (250ms)")
                 self._click_timer.start(250)
 
     def mouseDoubleClickEvent(self, event):
@@ -335,7 +331,6 @@ class ClickableVideoWidget(QVideoWidget):
         super().mouseDoubleClickEvent(event)
 
     def _on_click_timeout(self):
-        print(f"[DEBUG] VideoWidget - _on_click_timeout - Single Click Fired")
         self.clicked.emit()
         self._last_click_time = 0
 
