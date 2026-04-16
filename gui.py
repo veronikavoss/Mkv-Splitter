@@ -9,8 +9,7 @@ import subprocess
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                                QHBoxLayout, QPushButton, QSlider, QLabel, QFileDialog, QMessageBox, QStyle, QStyleOptionSlider, QListWidget, QListWidgetItem, QAbstractItemView,
                                QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox, QComboBox, QFrame, QProgressDialog)
-from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
-from PySide6.QtMultimediaWidgets import QVideoWidget
+import mpv
 from PySide6.QtCore import Qt, QUrl, QTime, QPoint, Signal, QObject, QEvent, QSize, QTimer, QThread
 
 import video_cutter
@@ -93,21 +92,21 @@ class ThumbnailGrabberThread(QObject):
                 video_path, time_msec = item
                 self.current_video_path = video_path
 
-                # Fast keyframe extraction using ffmpeg
+                # Optimized thumbnail extraction
                 cmd = [
                     "ffmpeg", "-y", "-hide_banner", "-loglevel", "quiet",
-                    "-skip_frame", "nokey",      # Only decode keyframes for fast seek!
-                    "-ss", f"{time_msec / 1000.0:.3f}",
+                    "-ss", f"{time_msec / 1000.0:.3f}", # Seeking before input is fastest
                     "-i", video_path,
                     "-vframes", "1",
-                    "-q:v", "5",
+                    "-an", "-sn", # Disable audio and subtitles for speed
+                    "-q:v", "8", # Slightly lower quality for much faster encoding
                     "-vf", "scale=288:-2",
                     "-f", "image2pipe",
                     "-vcodec", "mjpeg",
                     "-"
                 ]
                 
-                proc = subprocess.run(cmd, capture_output=True, creationflags=creation_flags)
+                proc = subprocess.run(cmd, capture_output=True, creationflags=creation_flags, timeout=2) # Add timeout to prevent hanging
                 
                 if proc.returncode == 0 and proc.stdout:
                     # Emit raw bytes to GUI thread safely!
@@ -292,9 +291,9 @@ class SegmentItemWidget(QWidget):
     def mouseDoubleClickEvent(self, event):
         event.ignore()
 
-class ClickableVideoWidget(QVideoWidget):
+class ClickableVideoWidget(QWidget):
     """
-    A custom QVideoWidget that emits a clicked signal on mouse release after the double click interval, 
+    A custom QWidget that emits a clicked signal on mouse release after the double click interval, 
     or a doubleClicked signal manually calculated via timing mousePressEvents.
     """
     clicked = Signal()
@@ -747,25 +746,54 @@ class MainWindow(QMainWindow):
                 border-left: 4px solid #ffcc00;
                 border-bottom: 1px solid #3c2d10;
             }
+            QWidget#videoCanvas {
+                background-color: black;
+            }
         """)
 
-        # Media Player Setup
-        self.media_player = QMediaPlayer()
-        self.audio_output = QAudioOutput()
-        self.media_player.setAudioOutput(self.audio_output)
+        # MPV Player - initialized after video widget is ready
+        self._mpv_prev_pause_state = True
         
         # UI Components
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
         self.layout = QVBoxLayout(self.central_widget)
 
-        # Video Widget
+        # Video Widget (MPV renders directly onto this native window)
         self.video_widget = ClickableVideoWidget(self.central_widget)
+        self.video_widget.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors)
+        self.video_widget.setAttribute(Qt.WidgetAttribute.WA_NativeWindow)
+        # Prevent Qt from painting background to avoid flickering or theme interference
+        self.video_widget.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent)
+        self.video_widget.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
         self.video_widget.setMinimumSize(1344, 756)
+        self.video_widget.setObjectName("videoCanvas")
+        self.video_widget.setStyleSheet("QWidget#videoCanvas { background-color: #000000; }")
+        # Ensure the stylesheet and custom painting are respected
+        self.video_widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.video_widget.clicked.connect(self.toggle_play)
         self.video_widget.doubleClicked.connect(self.handle_video_double_click)
         self.layout.addWidget(self.video_widget, stretch=1)
-        self.media_player.setVideoOutput(self.video_widget)
+
+        # Initialize MPV with hardware-accelerated GPU rendering
+        self.player = mpv.MPV(
+            wid=str(int(self.video_widget.winId())),
+            hwdec='auto',
+            vo='gpu',
+            keep_open='yes',
+            osd_level=0,
+            cursor_autohide='no',
+            input_cursor='no',
+            input_default_bindings='no',
+            input_vo_keyboard='no',
+        )
+        self.player.volume = 100
+
+        # Timer for polling MPV state (replaces Qt signal-based updates)
+        self._mpv_timer = QTimer(self)
+        self._mpv_timer.setInterval(50)
+        self._mpv_timer.timeout.connect(self._mpv_poll)
+        self._mpv_timer.start()
 
         # Bottom Panel Container
         self.bottom_panel = QWidget()
@@ -1173,10 +1201,7 @@ class MainWindow(QMainWindow):
         QApplication.instance().installEventFilter(self)
 
         # Signals
-        self.media_player.positionChanged.connect(self.position_changed)
-        self.media_player.durationChanged.connect(self.duration_changed)
-        self.media_player.errorOccurred.connect(self.handle_errors)
-        self.media_player.playbackStateChanged.connect(self.media_state_changed)
+        # MPV uses timer-based polling (_mpv_poll) instead of Qt signals
 
         # Status Bar
         self.statusBar().showMessage("준비 완료")
@@ -1241,10 +1266,10 @@ class MainWindow(QMainWindow):
         self.slider.hover_left.connect(self.on_slider_leave)
 
     def on_slider_hovered(self, val, global_pos):
-        if not hasattr(self, 'file_path') or not self.file_path or self.media_player.duration() <= 0:
+        if not hasattr(self, 'file_path') or not self.file_path or self._mpv_dur_ms() <= 0:
             return
             
-        duration = self.media_player.duration()
+        duration = self._mpv_dur_ms()
         val_range = self.slider.maximum() - self.slider.minimum()
         if val_range <= 0: return
         
@@ -1490,7 +1515,7 @@ class MainWindow(QMainWindow):
             if hasattr(self, 'thumbnail_tooltip') and self.thumbnail_tooltip:
                 self.thumbnail_tooltip.img_label.clear()
                 
-            self.media_player.setSource(QUrl.fromLocalFile(file_path))
+            self.player.play(file_path)
             self.play_video()
             self.merge_queue_list.setCurrentRow(index)
             self.setWindowTitle(f"MKV Lossless Cutter - 다중 파일 미리보기 ({index+1}/{len(self.multi_merge_files)})")
@@ -1507,7 +1532,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'thumbnail_tooltip') and self.thumbnail_tooltip:
             self.thumbnail_tooltip.img_label.clear()
             
-        self.media_player.setSource(QUrl.fromLocalFile(self.file_path))
+        self.player.play(self.file_path)
         self.play_button.setEnabled(True)
         self.stop_button.setEnabled(True)
         self.rewind_button.setEnabled(True)
@@ -1543,8 +1568,7 @@ class MainWindow(QMainWindow):
         self.multi_merge_files = []
         self._refresh_merge_queue_ui()
         self.file_path = None
-        self.media_player.stop()
-        self.media_player.setSource(QUrl())
+        self.player.command('stop')
         
         self.slider.setEnabled(False)
         self.play_button.setEnabled(False)
@@ -1565,8 +1589,7 @@ class MainWindow(QMainWindow):
         self.export_btn.setText("내보내기")
         self.slider.setEnabled(True)
 
-        self.media_player.stop()
-        self.media_player.setSource(QUrl())
+        self.player.command('stop')
         self.file_path = None
         self.play_button.setEnabled(True) # 빈 상태일 때 누를 수 있게 유지
         self.play_button.setToolTip("재생 / 파일 새로 열기")
@@ -1616,36 +1639,41 @@ class MainWindow(QMainWindow):
         else:
             btn.setIcon(icon)
 
-    def media_state_changed(self, state):
-        if state == QMediaPlayer.PlaybackState.PlayingState:
+    def media_state_changed(self, is_playing):
+        if is_playing:
             self.set_button_icon(self.play_button, self.pause_icon, "일시정지")
             self.statusBar().showMessage("재생")
         else:
             self.set_button_icon(self.play_button, self.play_icon, "재생")
-            if state == QMediaPlayer.PlaybackState.PausedState:
-                self.statusBar().showMessage("일시정지")
-            elif state == QMediaPlayer.PlaybackState.StoppedState:
-                self.statusBar().showMessage("정지됨")
+            self.statusBar().showMessage("일시정지")
 
     def toggle_play(self):
         if not self.file_path and not self.is_multi_merge_mode:
             self.open_file()
             return
-            
-        if self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
-            self.media_player.pause()
-        else:
-            self.media_player.play()
+        try:
+            self.player.pause = not self.player.pause
+        except:
+            pass
 
     def play_video(self):
-        self.media_player.play()
+        try:
+            self.player.pause = False
+        except:
+            pass
 
     def pause_video(self):
-        self.media_player.pause()
+        try:
+            self.player.pause = True
+        except:
+            pass
 
     def toggle_mute(self):
-        is_muted = not self.audio_output.isMuted()
-        self.audio_output.setMuted(is_muted)
+        try:
+            self.player.mute = not self.player.mute
+            is_muted = self.player.mute
+        except:
+            is_muted = False
         
         if is_muted:
             size = QSize(24, 24)
@@ -1690,54 +1718,59 @@ class MainWindow(QMainWindow):
         self.stop_and_clear()
 
     def set_volume(self, value):
-        # value is 0-100
-        linear_volume = value / 100.0
-        self.audio_output.setVolume(linear_volume)
+        # value is 0-100, mpv uses 0-100 directly
+        try:
+            self.player.volume = value
+        except:
+            pass
         
         if value == 0:
             self.volume_button.setIcon(self.volume_mute_icon)
-            self.audio_output.setMuted(True)
+            try: self.player.mute = True
+            except: pass
             self.statusBar().showMessage("음소거 설정됨")
         else:
             self.volume_button.setIcon(self.volume_icon)
-            self.audio_output.setMuted(False)
+            try: self.player.mute = False
+            except: pass
             self.statusBar().showMessage(f"볼륨: {value}%")
             
     def set_position(self, position):
-        self.media_player.setPosition(position)
+        try:
+            self.player.seek(position / 1000.0, "absolute+exact")
+        except:
+            pass
 
     def step_backward(self):
         if self.file_path:
-            # 1 프레임 이동 (대략 30fps 기준 ~33ms)
-            new_pos = max(0, self.media_player.position() - 33)
-            self.set_position(new_pos)
+            try:
+                self.player.frame_back_step()
+            except:
+                pass
             self.statusBar().showMessage("1프레임 뒤로")
 
     def skip_backward(self):
         if self.file_path:
-            new_pos = max(0, self.media_player.position() - 5000)
-            self.set_position(new_pos)
+            try:
+                self.player.seek(-5, "relative")
+            except:
+                pass
             self.statusBar().showMessage("5초 뒤로")
 
     def skip_forward(self):
         if self.file_path:
-            duration = self.media_player.duration()
-            if duration > 0:
-                new_pos = min(duration, self.media_player.position() + 5000)
-            else:
-                new_pos = self.media_player.position() + 5000
-            self.set_position(new_pos)
+            try:
+                self.player.seek(5, "relative")
+            except:
+                pass
             self.statusBar().showMessage("5초 앞으로")
 
     def step_forward(self):
         if self.file_path:
-            duration = self.media_player.duration()
-            # 1 프레임 이동 (대략 30fps 기준 ~33ms)
-            if duration > 0:
-                new_pos = min(duration, self.media_player.position() + 33)
-            else:
-                new_pos = self.media_player.position() + 33
-            self.set_position(new_pos)
+            try:
+                self.player.frame_step()
+            except:
+                pass
             self.statusBar().showMessage("1프레임 앞으로")
 
     def jump_to_start(self):
@@ -1753,7 +1786,7 @@ class MainWindow(QMainWindow):
             return
             
         starts = sorted(list(set(starts)))
-        current_pos = self.media_player.position()
+        current_pos = self._mpv_pos_ms()
         
         # 현재 위치보다 큰(오른쪽에 있는) 첫 번째 시작점 찾기 (약간의 오차 무시 위해 50ms 추가)
         next_start = next((s for s in starts if s > current_pos + 50), None)
@@ -1778,7 +1811,7 @@ class MainWindow(QMainWindow):
             return
             
         ends = sorted(list(set(ends)))
-        current_pos = self.media_player.position()
+        current_pos = self._mpv_pos_ms()
         
         # 현재 위치보다 큰(오른쪽에 있는) 첫 번째 끝점 찾기
         next_end = next((e for e in ends if e > current_pos + 50), None)
@@ -1791,15 +1824,21 @@ class MainWindow(QMainWindow):
 
     def slider_pressed(self):
         self.is_slider_pressed = True
-        self._was_playing_before_slider = (self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState)
-        self.media_player.pause()
+        self._was_playing_before_slider = not (self.player.pause if self.player.pause is not None else True)
+        try:
+            self.player.pause = True
+        except:
+            pass
 
     def slider_released(self):
         self.is_slider_pressed = False
         self.set_position(self.slider.value())
         
         if self._was_playing_before_slider:
-            self.media_player.play()
+            try:
+                self.player.pause = False
+            except:
+                pass
             self.play_button.setIcon(self.pause_icon)
             self.play_button.setToolTip("일시정지")
         else:
@@ -1810,10 +1849,9 @@ class MainWindow(QMainWindow):
         if not self.is_slider_pressed:
             self.slider.setValue(position)
             
-        # 다중 병합 미리보기 모드일 때, 영장 재생이 거의 끝나가면 다음 영상으로 전환
-        # QMediaPlayer.mediaStatusChanged 대신 duration에 도달했는지를 명확히 체크
-        if self.is_multi_merge_mode and self.media_player.duration() > 0:
-            if position >= self.media_player.duration() - 100: # 100ms 오차 허용
+        # 다중 병합 미리보기 모드일 때, 영상 재생이 거의 끝나가면 다음 영상으로 전환
+        if self.is_multi_merge_mode and self._mpv_dur_ms() > 0:
+            if position >= self._mpv_dur_ms() - 100: # 100ms 오차 허용
                 next_idx = self.multi_merge_play_idx + 1
                 if next_idx < len(self.multi_merge_files):
                     self._play_queue_index(next_idx)
@@ -1827,8 +1865,8 @@ class MainWindow(QMainWindow):
         self.update_time_label()
 
     def update_time_label(self):
-        current = self.format_time(self.media_player.position())
-        total = self.format_time(self.media_player.duration())
+        current = self.format_time(self._mpv_pos_ms())
+        total = self.format_time(self._mpv_dur_ms())
         self.time_label.setText(f"{current} / {total}")
 
     def format_time(self, ms):
@@ -1836,6 +1874,44 @@ class MainWindow(QMainWindow):
         minutes = (ms // 60000) % 60
         hours = (ms // 3600000)
         return f"{hours:02}:{minutes:02}:{seconds:02}"
+
+    def _mpv_pos_ms(self):
+        """Get current MPV position in milliseconds."""
+        try:
+            tp = self.player.time_pos
+            return int(tp * 1000) if tp is not None else 0
+        except:
+            return 0
+
+    def _mpv_dur_ms(self):
+        """Get current MPV duration in milliseconds."""
+        try:
+            d = self.player.duration
+            return int(d * 1000) if d is not None else 0
+        except:
+            return 0
+
+    def _mpv_poll(self):
+        """Timer-based polling to replace Qt media player signals."""
+        if not hasattr(self, 'player') or self.player is None:
+            return
+        try:
+            pos_ms = self._mpv_pos_ms()
+            dur_ms = self._mpv_dur_ms()
+            if dur_ms > 0 and self.slider.maximum() != dur_ms:
+                self.duration_changed(dur_ms)
+            self.position_changed(pos_ms)
+            is_paused = True
+            try:
+                p = self.player.pause
+                is_paused = p if p is not None else True
+            except:
+                pass
+            if is_paused != self._mpv_prev_pause_state:
+                self._mpv_prev_pause_state = is_paused
+                self.media_state_changed(not is_paused)
+        except:
+            pass
 
     def update_segments_list(self):
         self.segments_list.clear()
@@ -2129,7 +2205,7 @@ class MainWindow(QMainWindow):
 
     def set_start_mark(self):
         if getattr(self, 'is_multi_merge_mode', False): return
-        self.start_time = self.media_player.position()
+        self.start_time = self._mpv_pos_ms()
         self.end_time = 0 # Reset end time for a new segment
         self.update_segments_list()
         self.slider.set_current_selection(self.start_time, self.end_time)
@@ -2138,7 +2214,7 @@ class MainWindow(QMainWindow):
 
     def set_end_mark(self):
         if getattr(self, 'is_multi_merge_mode', False): return
-        current_pos = self.media_player.position()
+        current_pos = self._mpv_pos_ms()
         if current_pos <= self.start_time:
              QMessageBox.warning(self, "경고", "끝점은 시작점보다 뒤에 있어야 합니다.")
              return
@@ -2172,7 +2248,7 @@ class MainWindow(QMainWindow):
     def inverse_segments(self):
         if getattr(self, 'is_multi_merge_mode', False): return
         if not self.file_path: return
-        total_duration = self.media_player.duration()
+        total_duration = self._mpv_dur_ms()
         if total_duration <= 0: return
 
         if not self.segments:
@@ -2351,7 +2427,7 @@ class MainWindow(QMainWindow):
             output_dir = os.path.dirname(output_path)
             output_base, output_ext = os.path.splitext(os.path.basename(output_path))
             
-            process_segments = self.segments if has_segments else [(0, self.media_player.duration())]
+            process_segments = self.segments if has_segments else [(0, self._mpv_dur_ms())]
             total = len(process_segments)
             do_merge = self.merge_checkbox.isChecked() and total > 1
             
@@ -2446,12 +2522,17 @@ class MainWindow(QMainWindow):
 
     def handle_errors(self):
         self.play_button.setEnabled(False)
-        self.time_label.setText("오류: " + self.media_player.errorString())
+        self.time_label.setText("오류 발생")
 
     def closeEvent(self, event):
-        if hasattr(self, 'media_player'):
-            self.media_player.stop()
-            self.media_player.setSource(QUrl())
+        if hasattr(self, '_mpv_timer'):
+            self._mpv_timer.stop()
+            
+        if hasattr(self, 'player'):
+            try:
+                self.player.terminate()
+            except:
+                pass
             
         if hasattr(self, 'thumbnail_thread'):
             self.thumbnail_thread.stop()

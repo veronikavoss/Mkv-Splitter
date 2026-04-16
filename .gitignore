@@ -1,0 +1,11 @@
+libmpv-2.dll
+libmpv.7z
+libmpv.dll.a
+mkv-splitter
+include/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.ipynb_checkpoints/
+/tmp/

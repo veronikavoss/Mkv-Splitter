@@ -1,4 +1,13 @@
 import sys
+import os
+
+if sys.platform == "win32":
+    try:
+        os.add_dll_directory(os.path.dirname(os.path.abspath(__file__)))
+    except AttributeError:
+        pass
+    os.environ["PATH"] = os.path.dirname(os.path.abspath(__file__)) + os.pathsep + os.environ.get("PATH", "")
+
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QObject, QEvent
 from gui import MainWindow
