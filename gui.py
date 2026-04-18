@@ -1738,7 +1738,7 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
 
         act_full = menu.addAction("전체 화면 (Alt+Enter)")
-        act_full.triggered.connect(self.toggle_fullscreen)
+        act_full.triggered.connect(self.toggle_true_fullscreen)
         menu.addSeparator()
 
         act_exit = menu.addAction("종료 (Esc)")
