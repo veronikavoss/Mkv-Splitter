@@ -797,6 +797,16 @@ class MainWindow(QMainWindow):
         self._mpv_timer.timeout.connect(self._mpv_poll)
         self._mpv_timer.start()
 
+        # Top Panel Container (for fullscreen hover display)
+        self.top_panel = QWidget(self.central_widget)
+        self.top_panel.setStyleSheet("background-color: rgba(0, 0, 0, 180);")
+        self.top_panel.hide()
+        self.top_panel_layout = QHBoxLayout(self.top_panel)
+        self.top_panel_layout.setContentsMargins(15, 10, 15, 10)
+        self.top_title_label = QLabel("")
+        self.top_title_label.setStyleSheet("color: white; font-size: 16px; font-weight: bold; background: transparent;")
+        self.top_panel_layout.addWidget(self.top_title_label)
+
         # Bottom Panel Container
         self.bottom_panel = QWidget()
         self.bottom_panel_layout = QVBoxLayout(self.bottom_panel)
@@ -1358,6 +1368,8 @@ class MainWindow(QMainWindow):
             screen = QApplication.primaryScreen()
             if screen:
                 screen_h = screen.geometry().height()
+                
+                # --- Bottom Panel ---
                 if self.bottom_panel.isHidden() and self._is_true_fullscreen:
                     if y > screen_h * 0.90:
                         self.bottom_panel.show()
@@ -1373,11 +1385,26 @@ class MainWindow(QMainWindow):
                         self.bottom_panel.hide()
                         self.central_widget.updateGeometry()
                         self.update()
+
+                # --- Top Panel ---
+                if self.top_panel.isHidden() and self._is_true_fullscreen:
+                    if y < 80:
+                        self.top_panel.show()
+                        self.top_panel.raise_()
+                elif not self.top_panel.isHidden() and self._is_true_fullscreen:
+                    top_left = self.top_panel.mapToGlobal(QPoint(0, 0))
+                    from PySide6.QtCore import QRect
+                    panel_rect = QRect(top_left, self.top_panel.size())
+                    # Give an extra 30px tolerance below so it doesn't flicker
+                    if not panel_rect.adjusted(0, 0, 0, 30).contains(global_pos):
+                        self.top_panel.hide()
                         
         return super().eventFilter(obj, event)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        if hasattr(self, 'top_panel'):
+            self.top_panel.setGeometry(0, 0, self.central_widget.width(), 50)
     def changeEvent(self, event):
         if event.type() == QEvent.Type.WindowStateChange:
             assets_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets").replace("\\", "/")
@@ -1456,6 +1483,7 @@ class MainWindow(QMainWindow):
             self.central_widget.setStyleSheet("QWidget#centralWidget { background-color: transparent; }")
             self.layout.setContentsMargins(9, 9, 9, 9)
             self.bottom_panel.show()
+            self.top_panel.hide()
             self.showNormal()
             self.statusBar().setMaximumHeight(16777215) # Restore height
             self.statusBar().show()
@@ -1471,6 +1499,7 @@ class MainWindow(QMainWindow):
             self.central_widget.setStyleSheet("QWidget#centralWidget { background-color: black; }")
             self.layout.setContentsMargins(0, 0, 0, 0)
             self.bottom_panel.hide()
+            self.top_panel.hide()
             self.statusBar().hide()
             self.statusBar().setMaximumHeight(0) # Absolutely prevent visible rendering
             self.showFullScreen()
@@ -1549,6 +1578,7 @@ class MainWindow(QMainWindow):
             self.player.play(file_path)
             self.play_video()
             self.merge_queue_list.setCurrentRow(index)
+            self.top_title_label.setText(os.path.basename(file_path))
             self.setWindowTitle(f"MKV Lossless Cutter - 다중 파일 미리보기 ({index+1}/{len(self.multi_merge_files)})")
 
     def play_multi_merge_item(self, item):
@@ -1563,6 +1593,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'thumbnail_tooltip') and self.thumbnail_tooltip:
             self.thumbnail_tooltip.img_label.clear()
             
+        self.top_title_label.setText(os.path.basename(self.file_path))
         self.player.play(self.file_path)
         self.play_button.setEnabled(True)
         self.stop_button.setEnabled(True)
