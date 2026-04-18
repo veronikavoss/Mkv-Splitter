@@ -803,16 +803,6 @@ class MainWindow(QMainWindow):
         self.bottom_panel_layout.setContentsMargins(0, 0, 0, 0)
         self.bottom_panel_layout.setSpacing(4)
         
-        # Top Panel Container (for fullscreen)
-        self.top_panel = QWidget(self.central_widget)
-        self.top_panel.setStyleSheet("background-color: rgba(0, 0, 0, 180);")
-        self.top_panel.hide()
-        self.top_panel_layout = QHBoxLayout(self.top_panel)
-        self.top_panel_layout.setContentsMargins(15, 10, 15, 10)
-        self.top_title_label = QLabel("")
-        self.top_title_label.setStyleSheet("color: white; font-size: 16px; font-weight: bold; background: transparent;")
-        self.top_panel_layout.addWidget(self.top_title_label)
-        
         # Timeline Slider
         self.slider = SeekSlider(Qt.Orientation.Horizontal)
         self.slider.setObjectName("playbackSlider")
@@ -1366,13 +1356,6 @@ class MainWindow(QMainWindow):
                     if y > screen_h * 0.90:
                         self.bottom_panel.show()
                         
-                    # Top Panel 오토 하이드 로직 (상단 80px 이내)
-                    if y < 80:
-                        self.top_panel.show()
-                        self.top_panel.raise_()
-                    else:
-                        self.top_panel.hide()
-                        
                 elif not self.bottom_panel.isHidden() and self._is_true_fullscreen:
                     # 패널이 나타나있을 때는 마우스가 폼/패널 영역 안에 있는지 확인
                     top_left = self.bottom_panel.mapToGlobal(QPoint(0, 0))
@@ -1382,19 +1365,10 @@ class MainWindow(QMainWindow):
                     if not panel_rect.contains(global_pos):
                         self.bottom_panel.hide()
                         
-                    # Top Panel 오토 하이드 로직 연계
-                    if y < 80:
-                        self.top_panel.show()
-                        self.top_panel.raise_()
-                    else:
-                        self.top_panel.hide()
-                        
         return super().eventFilter(obj, event)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if hasattr(self, 'top_panel'):
-            self.top_panel.setGeometry(0, 0, self.width(), 50)
     def changeEvent(self, event):
         if event.type() == QEvent.Type.WindowStateChange:
             assets_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets").replace("\\", "/")
@@ -1464,9 +1438,9 @@ class MainWindow(QMainWindow):
         assets_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets").replace("\\", "/")
         if self.isFullScreen():
             self._is_true_fullscreen = False
+            self.central_widget.setStyleSheet("")
             self.layout.setContentsMargins(9, 9, 9, 9)
             self.bottom_panel.show()
-            self.top_panel.hide()
             self.showNormal()
             self.statusBar().show()
             if hasattr(self, 'menubar') and self.menubar: self.menubar.show()
@@ -1475,9 +1449,10 @@ class MainWindow(QMainWindow):
                 self.btn_fullscreen.setStyleSheet(f"QPushButton {{ background: transparent; border: none; border-image: url({assets_dir}/full_screen.svg); }} QPushButton:hover {{ border-image: url({assets_dir}/full_screen_hover.svg); }}")
         else:
             self._is_true_fullscreen = True
+            self.central_widget.setObjectName("centralWidget")
+            self.central_widget.setStyleSheet("QWidget#centralWidget { background-color: black; }")
             self.layout.setContentsMargins(0, 0, 0, 0)
             self.bottom_panel.hide()
-            self.top_panel.hide()
             self.showFullScreen()
             self.statusBar().hide()
             if hasattr(self, 'menubar') and self.menubar: self.menubar.hide()
