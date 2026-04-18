@@ -1196,6 +1196,13 @@ class MainWindow(QMainWindow):
         # Add the entire bottom panel to the main layout
         self.layout.addWidget(self.bottom_panel)
         
+        # Override statusBar().showMessage to prevent auto-unhiding during true fullscreen
+        self._original_show_message = self.statusBar().showMessage
+        def _custom_show_message(message, timeout=0):
+            if getattr(self, '_is_true_fullscreen', False):
+                return
+            self._original_show_message(message, timeout)
+        self.statusBar().showMessage = _custom_show_message
         
         self.setup_shortcuts()
         
