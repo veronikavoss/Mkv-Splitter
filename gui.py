@@ -1216,6 +1216,11 @@ class MainWindow(QMainWindow):
         self.statusBar().setStyleSheet("color: #cccccc; font-size: 12px;")
         self.statusBar().setMinimumHeight(28)
 
+        self.setup_shortcuts()
+        
+        self._is_true_fullscreen = False
+        QApplication.instance().installEventFilter(self)
+
         self.file_path = ""
         self.is_slider_pressed = False
         self._was_playing_before_slider = False
@@ -1436,7 +1441,6 @@ class MainWindow(QMainWindow):
         assets_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets").replace("\\", "/")
         if self._is_true_fullscreen:
             self._is_true_fullscreen = False
-            self.setStyleSheet("")
             self.central_widget.setStyleSheet("QWidget#centralWidget { background-color: transparent; }")
             if hasattr(self, '_normal_margins'):
                 self.layout.setContentsMargins(self._normal_margins)
@@ -1488,7 +1492,6 @@ class MainWindow(QMainWindow):
         assets_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets").replace("\\", "/")
         if self.isFullScreen():
             self._is_true_fullscreen = False
-            self.setStyleSheet("")
             self.central_widget.setStyleSheet("QWidget#centralWidget { background-color: transparent; }")
             if hasattr(self, '_normal_margins'):
                 self.layout.setContentsMargins(self._normal_margins)
@@ -1507,7 +1510,7 @@ class MainWindow(QMainWindow):
             self.update()
         else:
             self._is_true_fullscreen = True
-            self.setStyleSheet("QMainWindow { background-color: black; }")
+
             self.central_widget.setObjectName("centralWidget")
             self.central_widget.setStyleSheet("QWidget#centralWidget { background-color: black; }")
             
