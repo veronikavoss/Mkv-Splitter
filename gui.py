@@ -1224,7 +1224,7 @@ class MainWindow(QMainWindow):
 
         # Status Bar
         self.statusBar().showMessage("준비 완료")
-        self.statusBar().setStyleSheet("color: #cccccc; font-size: 13px;")
+        self.statusBar().setStyleSheet("color: #cccccc; font-size: 12px;")
         self.statusBar().setMinimumHeight(28)
 
         self.file_path = ""
